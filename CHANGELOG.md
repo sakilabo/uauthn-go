@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-05
+
+### Added
+
+- `passwd_file` and `index_file` settings in `config` and the Caddy directive. When set, no other location is searched.
+- `caddy uauthn add` accepts `--config` / `--adapter` and writes to the storage of that config, resolved like `caddy storage export`.
+
+### Changed
+
+- The Caddy module keeps `passwd` in Caddy's storage (`uauthn/passwd`) and reads the login page from `uauthn/index.html`, falling back to the embedded page. It no longer looks for files next to the `caddy` executable or in `~/.uauthn`.
+- The Caddy subdirectives `passwd` / `index` are replaced by `passwd_file` / `index_file`, and the `caddy uauthn add` option `--passwd` by `--passwd_file`.
+
+### Fixed
+
+- The standalone server took a directory named `config` or `passwd` next to the executable as its data files.
+
 ## [0.1.1] - 2026-10-05
 
 ### Added
