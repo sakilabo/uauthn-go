@@ -2,12 +2,11 @@ package uauthncaddy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -22,15 +21,20 @@ import (
 	"github.com/sakilabo/uauthn-go"
 )
 
+const commandUsage = uauthn.AddUsage + " [--config FILE [--adapter NAME]] [--passwd_file PATH]"
+
 func init() {
 	caddy.RegisterModule(Handler{})
 	httpcaddyfile.RegisterHandlerDirective("uauthn", parseCaddyfile)
 	httpcaddyfile.RegisterDirectiveOrder("uauthn", httpcaddyfile.Before, "basic_auth")
 	caddycmd.RegisterCommand(caddycmd.Command{
 		Name:  "uauthn",
-		Usage: uauthn.AddUsage + " [--passwd PATH]",
+		Usage: commandUsage,
 		Short: "Manages users of the uauthn handler",
-		Long:  "Adds a user to the uauthn passwd file or replaces the user's password.\nWithout --password, the password is read from the terminal twice.\n--reset removes every credential of the user, including passkeys.",
+		Long: "Adds a user to uauthn's passwd or replaces the user's password.\n" +
+			"The passwd is \"uauthn/passwd\" in the storage of the given config (or the default storage), or the file given by --passwd_file.\n" +
+			"Without --password, the password is read from the terminal twice.\n" +
+			"--reset removes every credential of the user, including passkeys.",
 		CobraFunc: func(cmd *cobra.Command) {
 			cmd.DisableFlagParsing = true
 			cmd.RunE = func(_ *cobra.Command, args []string) error { return runCommand(args) }
@@ -38,7 +42,7 @@ func init() {
 	})
 }
 
-const storageKey = "uauthn/" + uauthn.SessionFile
+const storagePrefix = "uauthn/"
 
 var sessionPool = caddy.NewUsagePool()
 
@@ -48,8 +52,8 @@ type Handler struct {
 	ExpiredSec    int    `json:"expired_sec,omitempty"`
 	Session       string `json:"session,omitempty"`
 	FlushSec      int    `json:"flush_sec,omitempty"`
-	Passwd        string `json:"passwd,omitempty"`
-	Index         string `json:"index,omitempty"`
+	PasswdFile    string `json:"passwd_file,omitempty"`
+	IndexFile     string `json:"index_file,omitempty"`
 	PasskeyPrompt string `json:"passkey_prompt,omitempty"`
 
 	server  *uauthn.Server
@@ -84,26 +88,15 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	if h.FlushSec <= 0 {
 		h.FlushSec = def.FlushSec
 	}
-	if h.Passwd == "" || h.Index == "" {
-		dir, err := uauthn.FindDir()
-		if err != nil {
-			return err
-		}
-		if h.Passwd == "" {
-			h.Passwd = filepath.Join(dir, uauthn.PasswdFile)
-		}
-		if h.Index == "" {
-			h.Index = filepath.Join(dir, uauthn.IndexFile)
-		}
-	}
 
+	storage := ctx.Storage()
 	logf := ctx.Logger().Sugar().Infof
 	flush := time.Duration(h.FlushSec) * time.Second
 	h.poolKey = h.Session + "/" + strconv.Itoa(h.FlushSec)
 	val, _, err := sessionPool.LoadOrNew(h.poolKey, func() (caddy.Destructor, error) {
-		var backend uauthn.SessionBackend
+		var backend uauthn.Backend
 		if h.Session == uauthn.SessionFileMode {
-			backend = storageBackend{storage: ctx.Storage()}
+			backend = newStorageBackend(storage, uauthn.SessionName)
 		}
 		return pooledSessions{uauthn.NewSessions(backend, flush, logf)}, nil
 	})
@@ -114,13 +107,20 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		Prefix:        h.Prefix,
 		Domain:        h.Domain,
 		Expire:        time.Duration(h.ExpiredSec) * time.Second,
-		Index:         h.Index,
+		Index:         fileOrStorage(h.IndexFile, storage, uauthn.IndexName),
 		PasskeyPrompt: h.PasskeyPrompt,
-		Users:         uauthn.NewUsers(h.Passwd),
+		Users:         uauthn.NewUsers(fileOrStorage(h.PasswdFile, storage, uauthn.PasswdName)),
 		Sessions:      val.(pooledSessions).Sessions,
 		Logf:          logf,
 	})
 	return nil
+}
+
+func fileOrStorage(path string, storage certmagic.Storage, name string) uauthn.Backend {
+	if path != "" {
+		return uauthn.FileBackend{Path: path}
+	}
+	return newStorageBackend(storage, name)
 }
 
 func (h *Handler) Cleanup() error {
@@ -178,10 +178,10 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			h.Session = val
 		case "flush_sec":
 			h.FlushSec, err = strconv.Atoi(val)
-		case "passwd":
-			h.Passwd = val
-		case "index":
-			h.Index = val
+		case "passwd_file":
+			h.PasswdFile = val
+		case "index_file":
+			h.IndexFile = val
 		case "passkey_prompt":
 			h.PasskeyPrompt = val
 		default:
@@ -201,45 +201,81 @@ func (p pooledSessions) Destruct() error {
 	return nil
 }
 
-type storageBackend struct{ storage certmagic.Storage }
+type storageBackend struct {
+	storage certmagic.Storage
+	key     string
+}
+
+func newStorageBackend(storage certmagic.Storage, name string) storageBackend {
+	return storageBackend{storage: storage, key: storagePrefix + name}
+}
+
+func (s storageBackend) String() string { return "storage:" + s.key }
 
 func (s storageBackend) Stat() (int64, time.Time, error) {
-	info, err := s.storage.Stat(context.Background(), storageKey)
+	info, err := s.storage.Stat(context.Background(), s.key)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return 0, time.Time{}, fs.ErrNotExist
-		}
 		return 0, time.Time{}, err
 	}
 	return info.Size, info.Modified, nil
 }
 
 func (s storageBackend) Load() ([]byte, error) {
-	return s.storage.Load(context.Background(), storageKey)
+	return s.storage.Load(context.Background(), s.key)
 }
 
 func (s storageBackend) Store(data []byte) error {
-	return s.storage.Store(context.Background(), storageKey, data)
+	return s.storage.Store(context.Background(), s.key, data)
 }
 
 func runCommand(args []string) error {
 	if len(args) == 0 || args[0] != "add" {
-		return fmt.Errorf("usage: caddy uauthn %s [--passwd PATH]", uauthn.AddUsage)
+		return fmt.Errorf("usage: caddy uauthn %s", commandUsage)
 	}
-	var passwd string
-	o, err := uauthn.ParseAddArgs(args[1:], map[string]*string{"passwd": &passwd})
+	var config, adapter, passwdFile string
+	o, err := uauthn.ParseAddArgs(args[1:], map[string]*string{"config": &config, "adapter": &adapter, "passwd_file": &passwdFile})
 	if err != nil {
 		return err
 	}
-	if passwd == "" {
-		dir, err := uauthn.FindDir()
-		if err != nil {
-			return err
-		}
-		passwd = filepath.Join(dir, uauthn.PasswdFile)
+	if passwdFile != "" {
+		return uauthn.RunAdd(o, uauthn.FileBackend{Path: passwdFile}, os.Stdout)
 	}
-	o.Passwd = passwd
-	return uauthn.RunAdd(o, os.Stdout)
+	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
+	defer cancel()
+	storage, err := configuredStorage(ctx, config, adapter)
+	if err != nil {
+		return err
+	}
+	return uauthn.RunAdd(o, newStorageBackend(storage, uauthn.PasswdName), os.Stdout)
+}
+
+// configuredStorage resolves the storage the same way as "caddy storage export".
+func configuredStorage(ctx caddy.Context, config, adapter string) (certmagic.Storage, error) {
+	if config == "" {
+		return caddy.DefaultStorage, nil
+	}
+	cfg, _, _, err := caddycmd.LoadConfig(config, adapter)
+	if err != nil {
+		return nil, err
+	}
+	var top struct {
+		StorageRaw json.RawMessage `json:"storage,omitempty" caddy:"namespace=caddy.storage inline_key=module"`
+	}
+	if err := json.Unmarshal(cfg, &top); err != nil {
+		var syn *json.SyntaxError
+		if errors.As(err, &syn) {
+			return caddy.DefaultStorage, nil
+		}
+		return nil, err
+	}
+	if top.StorageRaw == nil {
+		return caddy.DefaultStorage, nil
+	}
+	val, err := ctx.LoadModule(&top, "StorageRaw")
+	if err != nil {
+		return nil, err
+	}
+	return val.(caddy.StorageConverter).CertMagicStorage()
 }
 
 var (

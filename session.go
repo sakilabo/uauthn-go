@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io/fs"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -79,28 +78,8 @@ func decodeSessions(data []byte) (map[sessionID]int64, bool) {
 	return m, true
 }
 
-type SessionBackend interface {
-	Stat() (size int64, mod time.Time, err error)
-	Load() ([]byte, error)
-	Store([]byte) error
-}
-
-type FileBackend struct{ Path string }
-
-func (f FileBackend) Stat() (int64, time.Time, error) {
-	st, err := os.Stat(f.Path)
-	if err != nil {
-		return 0, time.Time{}, err
-	}
-	return st.Size(), st.ModTime(), nil
-}
-
-func (f FileBackend) Load() ([]byte, error) { return os.ReadFile(f.Path) }
-
-func (f FileBackend) Store(data []byte) error { return writeInPlace(f.Path, data, 0o600) }
-
 type Sessions struct {
-	backend SessionBackend
+	backend Backend
 	logf    Logf
 
 	mu      sync.Mutex
@@ -116,7 +95,7 @@ type Sessions struct {
 	done chan struct{}
 }
 
-func NewSessions(backend SessionBackend, flush time.Duration, logf Logf) *Sessions {
+func NewSessions(backend Backend, flush time.Duration, logf Logf) *Sessions {
 	s := &Sessions{
 		backend: backend,
 		logf:    logf,

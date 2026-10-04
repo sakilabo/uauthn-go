@@ -34,16 +34,16 @@ uauthn version
 
 ### データディレクトリー
 
-実行ファイルのディレクトリーに `config` か `passwd` があればそこ、なければ `~/.uauthn` です。ファイルはすべてここに置きます。
+実行ファイルのディレクトリーに、通常のファイルの `config` か `passwd` があればそこ、なければ `~/.uauthn` です。
 
-| ファイル | 内容 |
-| --- | --- |
-| `config` | 設定（省略可） |
-| `passwd` | ユーザーと認証情報 |
-| `session.dat` | セッションの時刻（`session = file`） |
-| `index.html` | ログインページ（省略可。なければ組み込みのページ） |
+| ファイル | 内容 | 場所 |
+| --- | --- | --- |
+| `config` | 設定（省略可） | データディレクトリー |
+| `passwd` | ユーザーと認証情報 | `passwd_file`。なければデータディレクトリー |
+| `index.html` | ログインページ（省略可。なければ組み込みのページ） | `index_file`。なければデータディレクトリー |
+| `session.dat` | セッションの時刻（`session = file`） | データディレクトリー |
 
-既存のファイルはその場で書き換えるため、`passwd` と `session.dat` はシンボリックリンクにできます。
+`passwd_file` か `index_file` を指定した場合、ほかの場所は探しません。既存のファイルはその場で書き換えるため、`passwd` と `session.dat` はシンボリックリンクにできます。
 
 ### config
 
@@ -60,6 +60,8 @@ flush_sec = 5
 log =
 log_max_size = 1048576
 passkey_prompt = always
+passwd_file =
+index_file =
 ```
 
 | キー | 既定値 | 内容 |
@@ -74,6 +76,8 @@ passkey_prompt = always
 | `log` | （空） | ログファイル。空なら標準出力、Windows サービスとして動作中はイベントログ |
 | `log_max_size` | `1048576` | ログがこのサイズを超えるとき、`*.old` に名前を変える。`0` で制限なし |
 | `passkey_prompt` | `always` | 戻り先のあるパスワードでのサインインの後、`always` はパスキーの登録を案内する。`unregistered` はパスキーが未登録のときだけ案内する。`never` はすぐに戻る |
+| `passwd_file` | （空） | `passwd` ファイル。相対パスはデータディレクトリーが基準 |
+| `index_file` | （空） | ログインページのファイル。相対パスはデータディレクトリーが基準 |
 
 ログファイルは1行ごとに開いて閉じるため、外部のローテーションがいつでも名前の変更や削除をできます。
 
@@ -196,7 +200,7 @@ uauthn uninstall
 
 ## Caddy モジュール
 
-モジュール `http.handlers.uauthn` は、ログインページとセッションの確認を Caddy の中で処理します。別のプロセスも `forward_auth` も使いません。
+モジュール `http.handlers.uauthn` は、ログインページとセッションの確認を Caddy の中で処理します。別のプロセスも `forward_auth` も使いません。ファイルは Caddy のストレージの `uauthn/` の下に置くため、ファイルの場所を管理する必要はありません。
 
 ```sh
 xcaddy build --with github.com/sakilabo/uauthn-go/caddy
@@ -204,19 +208,22 @@ xcaddy build --with github.com/sakilabo/uauthn-go/caddy
 
 ```caddyfile
 example.com {
-	uauthn {
-		prefix /uauthn
-		passwd /etc/caddy/passwd
-	}
+	uauthn
 	reverse_proxy 127.0.0.1:8080
 }
 ```
 
+| Caddy のストレージのキー | 内容 |
+| --- | --- |
+| `uauthn/passwd` | ユーザーと認証情報（`passwd_file` を指定しない場合） |
+| `uauthn/index.html` | ログインページ（`index_file` を指定しない場合）。なければ組み込みのページ |
+| `uauthn/session.dat` | セッションの時刻（`session file`） |
+
 | サブディレクティブ | 既定値 | |
 | --- | --- | --- |
 | `prefix` | `/uauthn` | ログインページとエンドポイントのパス |
-| `passwd` | `caddy` の実行ファイルから決めたデータディレクトリー | `passwd` ファイル |
-| `index` | データディレクトリー | ログインページ。なければ組み込みのページ |
+| `passwd_file` | （空） | `uauthn/passwd` の代わりにこのファイルを使う |
+| `index_file` | （空） | `uauthn/index.html` の代わりにこのファイルを使う |
 | `domain` | （空） | Cookie の `Domain` と RP ID |
 | `expired_sec` | `86400` | |
 | `session` | `file` | `file` / `storage`：Caddy のストレージの `uauthn/session.dat`。`memory`：設定の再読み込みでは残り、再起動で消える |
@@ -229,8 +236,10 @@ example.com {
 - ユーザーは `caddy` のサブコマンドで管理します：
 
 ```
-caddy uauthn add [--password PASSWORD] [--reset] [--passwd PATH] USERNAME
+caddy uauthn add [--password PASSWORD] [--reset] [--config FILE [--adapter NAME]] [--passwd_file PATH] USERNAME
 ```
+
+  指定した設定のストレージ（`caddy storage export` と同じ方法で決める）、`--config` がなければ既定のストレージの `uauthn/passwd` に書き込みます。Caddy のプロセスと同じ環境で実行します。ディレクティブで `passwd_file` を指定している場合は、同じファイルを `--passwd_file` で指定します。
 
 ## ライセンス
 

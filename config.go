@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	ConfigFile  = "config"
-	PasswdFile  = "passwd"
-	SessionFile = "session.dat"
-	IndexFile   = "index.html"
+	ConfigName  = "config"
+	PasswdName  = "passwd"
+	SessionName = "session.dat"
+	IndexName   = "index.html"
 )
 
 const (
@@ -31,6 +31,9 @@ const (
 )
 
 type Config struct {
+	Dir           string
+	PasswdFile    string
+	IndexFile     string
 	Bind          string
 	Port          int
 	Prefix        string
@@ -56,16 +59,21 @@ func DefaultConfig() Config {
 	}
 }
 
-func LoadConfig(path string) (Config, error) {
+func LoadConfig(dir string) (Config, error) {
 	c := DefaultConfig()
+	c.Dir = dir
+	path := filepath.Join(dir, ConfigName)
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return c, nil
+		return c, c.Validate()
 	}
 	if err != nil {
 		return c, err
 	}
 	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return c, fmt.Errorf("%s: not a regular file", path)
+	}
 
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
@@ -110,6 +118,10 @@ func (c *Config) set(key, val string) error {
 		c.LogMaxSize, err = strconv.ParseInt(val, 10, 64)
 	case "passkey_prompt":
 		c.PasskeyPrompt = val
+	case "passwd_file":
+		c.PasswdFile = val
+	case "index_file":
+		c.IndexFile = val
 	default:
 		return fmt.Errorf("unknown key %q", key)
 	}
@@ -121,6 +133,8 @@ func (c *Config) set(key, val string) error {
 
 func (c *Config) Validate() error {
 	var err error
+	c.PasswdFile = c.resolve(c.PasswdFile, PasswdName)
+	c.IndexFile = c.resolve(c.IndexFile, IndexName)
 	if c.Prefix, err = NormalizePrefix(c.Prefix); err != nil {
 		return err
 	}
@@ -173,8 +187,8 @@ func (c Config) Flush() time.Duration { return time.Duration(c.FlushSec) * time.
 func FindDir() (string, error) {
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
-		for _, name := range []string{ConfigFile, PasswdFile} {
-			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+		for _, name := range []string{ConfigName, PasswdName} {
+			if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() {
 				return dir, nil
 			}
 		}
@@ -195,3 +209,15 @@ func NormalizePasskeyPrompt(p string) (string, error) {
 	}
 	return "", fmt.Errorf("passkey_prompt: unknown value %q", p)
 }
+
+func (c *Config) resolve(path, name string) string {
+	if path == "" {
+		return filepath.Join(c.Dir, name)
+	}
+	if !filepath.IsAbs(path) {
+		return filepath.Join(c.Dir, path)
+	}
+	return path
+}
+
+func (c Config) SessionFile() string { return filepath.Join(c.Dir, SessionName) }

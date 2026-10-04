@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -93,12 +92,19 @@ func add(args []string) error {
 		}
 		return err
 	}
-	dir, err := uauthn.FindDir()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
-	o.Passwd = filepath.Join(dir, uauthn.PasswdFile)
-	return uauthn.RunAdd(o, os.Stdout)
+	return uauthn.RunAdd(o, uauthn.FileBackend{Path: cfg.PasswdFile}, os.Stdout)
+}
+
+func loadConfig() (uauthn.Config, error) {
+	dir, err := uauthn.FindDir()
+	if err != nil {
+		return uauthn.Config{}, err
+	}
+	return uauthn.LoadConfig(dir)
 }
 
 func listenAddr(cfg uauthn.Config, arg string) (string, error) {
@@ -115,11 +121,7 @@ func listenAddr(cfg uauthn.Config, arg string) (string, error) {
 }
 
 func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
-	dir, err := uauthn.FindDir()
-	if err != nil {
-		return err
-	}
-	cfg, err := uauthn.LoadConfig(filepath.Join(dir, uauthn.ConfigFile))
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
@@ -128,12 +130,12 @@ func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
 		return err
 	}
 	if logf == nil || cfg.Log != "" {
-		logf = newLogger(cfg, dir)
+		logf = newLogger(cfg)
 	}
 
-	var backend uauthn.SessionBackend
+	var backend uauthn.Backend
 	if cfg.Session == uauthn.SessionFileMode {
-		backend = uauthn.FileBackend{Path: filepath.Join(dir, uauthn.SessionFile)}
+		backend = uauthn.FileBackend{Path: cfg.SessionFile()}
 	}
 	sessions := uauthn.NewSessions(backend, cfg.Flush(), logf)
 	defer sessions.Close()
@@ -142,9 +144,9 @@ func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
 		Prefix:         cfg.Prefix,
 		Domain:         cfg.Domain,
 		Expire:         cfg.Expire(),
-		Index:          filepath.Join(dir, uauthn.IndexFile),
+		Index:          uauthn.FileBackend{Path: cfg.IndexFile},
 		PasskeyPrompt:  cfg.PasskeyPrompt,
-		Users:          uauthn.NewUsers(filepath.Join(dir, uauthn.PasswdFile)),
+		Users:          uauthn.NewUsers(uauthn.FileBackend{Path: cfg.PasswdFile}),
 		Sessions:       sessions,
 		Logf:           logf,
 		TrustForwarded: true,
@@ -155,7 +157,7 @@ func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
 		return err
 	}
 	hs := &http.Server{Handler: handler(srv), ReadHeaderTimeout: 10 * time.Second}
-	logf("uauthn %s listening on %s (data: %s)", version, ln.Addr(), dir)
+	logf("uauthn %s listening on %s (data: %s)", version, ln.Addr(), cfg.Dir)
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()
 	select {

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -30,7 +29,7 @@ type Options struct {
 	Prefix        string
 	Domain        string
 	Expire        time.Duration
-	Index         string
+	Index         Backend
 	PasskeyPrompt string
 	Users         *Users
 	Sessions      *Sessions
@@ -149,8 +148,8 @@ func (s *Server) expectedOrigin(r *http.Request) string {
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data := defaultIndex
-	if s.opt.Index != "" {
-		if b, err := os.ReadFile(s.opt.Index); err == nil {
+	if s.opt.Index != nil {
+		if b, err := s.opt.Index.Load(); err == nil {
 			data = b
 		}
 	}

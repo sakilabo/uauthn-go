@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,19 +91,17 @@ func ValidUserName(name string) error {
 }
 
 type Users struct {
-	path  string
+	store Backend
 	mu    sync.Mutex
 	size  int64
 	mod   time.Time
 	lines []passwdLine
 }
 
-func NewUsers(path string) *Users { return &Users{path: path, size: -1} }
-
-func (u *Users) Path() string { return u.path }
+func NewUsers(store Backend) *Users { return &Users{store: store, size: -1} }
 
 func (u *Users) load() error {
-	st, err := os.Stat(u.path)
+	size, mod, err := u.store.Stat()
 	if errors.Is(err, fs.ErrNotExist) {
 		u.lines, u.size, u.mod = nil, -1, time.Time{}
 		return nil
@@ -113,14 +109,14 @@ func (u *Users) load() error {
 	if err != nil {
 		return err
 	}
-	if st.Size() == u.size && st.ModTime().Equal(u.mod) {
+	if size == u.size && mod.Equal(u.mod) {
 		return nil
 	}
-	data, err := os.ReadFile(u.path)
+	data, err := u.store.Load()
 	if err != nil {
 		return err
 	}
-	u.lines, u.size, u.mod = parsePasswd(data), st.Size(), st.ModTime()
+	u.lines, u.size, u.mod = parsePasswd(data), size, mod
 	return nil
 }
 
@@ -234,7 +230,7 @@ func (u *Users) SetPassword(name, hash string, reset bool) (created bool, err er
 func (u *Users) update(fn func([]passwdLine) ([]passwdLine, error)) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	data, err := os.ReadFile(u.path)
+	data, err := u.store.Load()
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -242,30 +238,9 @@ func (u *Users) update(fn func([]passwdLine) ([]passwdLine, error)) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(u.path), 0o700); err != nil {
-		return err
-	}
-	if err := writeInPlace(u.path, formatPasswd(lines), 0o600); err != nil {
+	if err := u.store.Store(formatPasswd(lines)); err != nil {
 		return err
 	}
 	u.size = -1
 	return u.load()
-}
-
-// writeInPlace rewrites the existing file instead of replacing it, so a symbolic link keeps pointing to its target.
-func writeInPlace(path string, data []byte, perm os.FileMode) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, perm)
-	if err != nil {
-		return err
-	}
-	if _, err = f.WriteAt(data, 0); err == nil {
-		err = f.Truncate(int64(len(data)))
-	}
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	return err
 }

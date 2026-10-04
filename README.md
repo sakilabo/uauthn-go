@@ -34,16 +34,16 @@ uauthn version
 
 ### Data directory
 
-The executable's directory when it contains `config` or `passwd`; otherwise `~/.uauthn`. All files live there.
+The executable's directory when it contains a regular file named `config` or `passwd`; otherwise `~/.uauthn`.
 
-| File | Content |
-| --- | --- |
-| `config` | Settings (optional) |
-| `passwd` | Users and credentials |
-| `session.dat` | Session times (`session = file`) |
-| `index.html` | Login page (optional; the embedded page is used when absent) |
+| File | Content | Location |
+| --- | --- | --- |
+| `config` | Settings (optional) | Data directory |
+| `passwd` | Users and credentials | `passwd_file`, otherwise the data directory |
+| `index.html` | Login page (optional; the embedded page is used when absent) | `index_file`, otherwise the data directory |
+| `session.dat` | Session times (`session = file`) | Data directory |
 
-An existing file is rewritten in place, so `passwd` and `session.dat` may be symbolic links.
+When `passwd_file` or `index_file` is set, no other location is searched. An existing file is rewritten in place, so `passwd` and `session.dat` may be symbolic links.
 
 ### config
 
@@ -60,6 +60,8 @@ flush_sec = 5
 log =
 log_max_size = 1048576
 passkey_prompt = always
+passwd_file =
+index_file =
 ```
 
 | Key | Default | Meaning |
@@ -74,6 +76,8 @@ passkey_prompt = always
 | `log` | (empty) | Log file. Empty: standard output, or the Event Log when running as a Windows service |
 | `log_max_size` | `1048576` | When the log would exceed this size, it is renamed to `*.old`. `0`: no limit |
 | `passkey_prompt` | `always` | After a password sign-in with a return URL: `always` offers passkey registration, `unregistered` offers it only when the user has no passkey, `never` returns at once |
+| `passwd_file` | (empty) | `passwd` file; a relative path is resolved against the data directory |
+| `index_file` | (empty) | Login page file; a relative path is resolved against the data directory |
 
 The log file is opened for each line, so external rotation may rename or delete it at any time.
 
@@ -196,7 +200,7 @@ uauthn uninstall
 
 ## Caddy module
 
-The module `http.handlers.uauthn` serves the login page and checks the session inside Caddy, without a separate process or `forward_auth`.
+The module `http.handlers.uauthn` serves the login page and checks the session inside Caddy, without a separate process or `forward_auth`. Its files live in Caddy's storage under `uauthn/`, so no file location needs to be managed.
 
 ```sh
 xcaddy build --with github.com/sakilabo/uauthn-go/caddy
@@ -204,19 +208,22 @@ xcaddy build --with github.com/sakilabo/uauthn-go/caddy
 
 ```caddyfile
 example.com {
-	uauthn {
-		prefix /uauthn
-		passwd /etc/caddy/passwd
-	}
+	uauthn
 	reverse_proxy 127.0.0.1:8080
 }
 ```
 
+| Key in Caddy's storage | Content |
+| --- | --- |
+| `uauthn/passwd` | Users and credentials (unless `passwd_file` is set) |
+| `uauthn/index.html` | Login page (unless `index_file` is set); the embedded page is used when absent |
+| `uauthn/session.dat` | Session times (`session file`) |
+
 | Subdirective | Default | |
 | --- | --- | --- |
 | `prefix` | `/uauthn` | Path of the login page and its endpoints |
-| `passwd` | data directory, resolved from the `caddy` executable | `passwd` file |
-| `index` | data directory | Login page; the embedded page is used when absent |
+| `passwd_file` | (empty) | Use this file instead of `uauthn/passwd` |
+| `index_file` | (empty) | Use this file instead of `uauthn/index.html` |
 | `domain` | (empty) | Cookie `Domain` and RP ID |
 | `expired_sec` | `86400` | |
 | `session` | `file` | `file` / `storage`: `uauthn/session.dat` in Caddy's storage. `memory`: kept across config reloads, lost on restart |
@@ -229,8 +236,10 @@ example.com {
 - Users are managed with a `caddy` subcommand:
 
 ```
-caddy uauthn add [--password PASSWORD] [--reset] [--passwd PATH] USERNAME
+caddy uauthn add [--password PASSWORD] [--reset] [--config FILE [--adapter NAME]] [--passwd_file PATH] USERNAME
 ```
+
+  It writes `uauthn/passwd` in the storage of the given config, resolved the same way as `caddy storage export`, or the default storage without `--config`. Run it in the same environment as the Caddy process. When the directive sets `passwd_file`, give the same file with `--passwd_file`.
 
 ## License
 

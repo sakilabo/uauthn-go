@@ -18,13 +18,13 @@ func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-func newLogger(cfg uauthn.Config, dir string) uauthn.Logf {
+func newLogger(cfg uauthn.Config) uauthn.Logf {
 	if cfg.Log == "" {
 		return log.New(os.Stdout, "", log.LstdFlags).Printf
 	}
 	path := cfg.Log
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(dir, path)
+		path = filepath.Join(cfg.Dir, path)
 	}
 	fl := &fileLogger{path: path, max: cfg.LogMaxSize}
 	return fl.printf

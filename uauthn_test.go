@@ -35,9 +35,13 @@ func TestCaddyHashCompatibility(t *testing.T) {
 }
 
 func TestConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config")
+	if c, err := LoadConfig(dir); err != nil || c.PasswdFile != filepath.Join(dir, "passwd") || c.IndexFile != filepath.Join(dir, "index.html") {
+		t.Fatalf("defaults without config: %v %+v", err, c)
+	}
 	os.WriteFile(path, []byte("# comment\nport = 8080\nprefix = auth/\nsession = storage\ndomain=example.com\n"), 0o600)
-	c, err := LoadConfig(path)
+	c, err := LoadConfig(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,15 +49,20 @@ func TestConfig(t *testing.T) {
 		t.Fatalf("unexpected config %+v", c)
 	}
 	os.WriteFile(path, []byte("passkey_prompt = Unregistered\n"), 0o600)
-	if c, err := LoadConfig(path); err != nil || c.PasskeyPrompt != PromptUnregistered {
+	if c, err := LoadConfig(dir); err != nil || c.PasskeyPrompt != PromptUnregistered {
 		t.Fatalf("passkey_prompt: %v %q", err, c.PasskeyPrompt)
 	}
 	os.WriteFile(path, []byte("passkey_prompt = sometimes\n"), 0o600)
-	if _, err := LoadConfig(path); err == nil {
+	if _, err := LoadConfig(dir); err == nil {
 		t.Fatal("invalid passkey_prompt accepted")
 	}
+	abs := filepath.Join(t.TempDir(), "users")
+	os.WriteFile(path, []byte("passwd_file = "+abs+"\nindex_file = page.html\n"), 0o600)
+	if c, err := LoadConfig(dir); err != nil || c.PasswdFile != abs || c.IndexFile != filepath.Join(dir, "page.html") {
+		t.Fatalf("file settings: %v %+v", err, c)
+	}
 	os.WriteFile(path, []byte("unknown = 1\n"), 0o600)
-	if _, err := LoadConfig(path); err == nil {
+	if _, err := LoadConfig(dir); err == nil {
 		t.Fatal("unknown key accepted")
 	}
 }
@@ -61,7 +70,7 @@ func TestConfig(t *testing.T) {
 func TestPasswd(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "passwd")
 	os.WriteFile(path, []byte("# users\nalice\tpasskey:AQID:-7:BAUG\textra\n"), 0o600)
-	u := NewUsers(path)
+	u := NewUsers(FileBackend{Path: path})
 	if _, err := u.SetPassword("alice", "$argon2id$x", false); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +189,7 @@ func (a *authenticator) response(typ, challenge, origin, rpID string) (cdj, ad, 
 
 func TestServerFlow(t *testing.T) {
 	dir := t.TempDir()
-	users := NewUsers(filepath.Join(dir, "passwd"))
+	users := NewUsers(FileBackend{Path: filepath.Join(dir, "passwd")})
 	hash, _ := HashPassword("pw")
 	users.SetPassword("alice", hash, false)
 	sessions := NewSessions(nil, time.Hour, t.Logf)

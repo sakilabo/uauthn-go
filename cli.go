@@ -17,7 +17,6 @@ type AddOptions struct {
 	Password string
 	HasPass  bool
 	Reset    bool
-	Passwd   string
 }
 
 func ParseAddArgs(args []string, extra map[string]*string) (AddOptions, error) {
@@ -64,7 +63,7 @@ func ParseAddArgs(args []string, extra map[string]*string) (AddOptions, error) {
 	return o, ValidUserName(o.User)
 }
 
-func RunAdd(o AddOptions, out io.Writer) error {
+func RunAdd(o AddOptions, passwd Backend, out io.Writer) error {
 	if !o.HasPass {
 		p, err := readNewPassword(out)
 		if err != nil {
@@ -79,17 +78,17 @@ func RunAdd(o AddOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	created, err := NewUsers(o.Passwd).SetPassword(o.User, hash, o.Reset)
+	created, err := NewUsers(passwd).SetPassword(o.User, hash, o.Reset)
 	if err != nil {
 		return err
 	}
 	switch {
 	case created:
-		fmt.Fprintf(out, "added %s to %s\n", o.User, o.Passwd)
+		fmt.Fprintf(out, "added %s to %s\n", o.User, passwd)
 	case o.Reset:
-		fmt.Fprintf(out, "reset %s in %s\n", o.User, o.Passwd)
+		fmt.Fprintf(out, "reset %s in %s\n", o.User, passwd)
 	default:
-		fmt.Fprintf(out, "updated the password of %s in %s\n", o.User, o.Passwd)
+		fmt.Fprintf(out, "updated the password of %s in %s\n", o.User, passwd)
 	}
 	return nil
 }
