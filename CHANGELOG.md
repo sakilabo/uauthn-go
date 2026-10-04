@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-05
+
+### Added
+
+- `title` setting (default `Sign in`) in `config` and the Caddy directive for the title and heading of the login page. `/challenge` returns `title`.
+
+### Removed
+
+- The message on the login page that asked for passkey registration after a password sign-in.
+
 ## [0.3.0] - 2026-10-05
 
 ### Removed
