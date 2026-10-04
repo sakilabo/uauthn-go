@@ -2,8 +2,6 @@ package uauthncaddy
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,7 +19,7 @@ import (
 	"github.com/sakilabo/uauthn-go"
 )
 
-const commandUsage = uauthn.AddUsage + " [--config FILE [--adapter NAME]] [--passwd_file PATH]"
+const commandUsage = uauthn.AddUsage + " [--passwd_file PATH]"
 
 func init() {
 	caddy.RegisterModule(Handler{})
@@ -32,7 +30,7 @@ func init() {
 		Usage: commandUsage,
 		Short: "Manages users of the uauthn handler",
 		Long: "Adds a user to uauthn's passwd or replaces the user's password.\n" +
-			"The passwd is \"uauthn/passwd\" in the storage of the given config (or the default storage), or the file given by --passwd_file.\n" +
+			"The passwd is the file given by --passwd_file, or \"uauthn/passwd\" in the default storage.\n" +
 			"Without --password, the password is read from the terminal twice.\n" +
 			"--reset removes every credential of the user, including passkeys.",
 		CobraFunc: func(cmd *cobra.Command) {
@@ -232,50 +230,15 @@ func runCommand(args []string) error {
 	if len(args) == 0 || args[0] != "add" {
 		return fmt.Errorf("usage: caddy uauthn %s", commandUsage)
 	}
-	var config, adapter, passwdFile string
-	o, err := uauthn.ParseAddArgs(args[1:], map[string]*string{"config": &config, "adapter": &adapter, "passwd_file": &passwdFile})
+	var passwdFile string
+	o, err := uauthn.ParseAddArgs(args[1:], map[string]*string{"passwd_file": &passwdFile})
 	if err != nil {
 		return err
 	}
 	if passwdFile != "" {
 		return uauthn.RunAdd(o, uauthn.FileBackend{Path: passwdFile}, os.Stdout)
 	}
-	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-	defer cancel()
-	storage, err := configuredStorage(ctx, config, adapter)
-	if err != nil {
-		return err
-	}
-	return uauthn.RunAdd(o, newStorageBackend(storage, uauthn.PasswdName), os.Stdout)
-}
-
-// configuredStorage resolves the storage the same way as "caddy storage export".
-func configuredStorage(ctx caddy.Context, config, adapter string) (certmagic.Storage, error) {
-	if config == "" {
-		return caddy.DefaultStorage, nil
-	}
-	cfg, _, _, err := caddycmd.LoadConfig(config, adapter)
-	if err != nil {
-		return nil, err
-	}
-	var top struct {
-		StorageRaw json.RawMessage `json:"storage,omitempty" caddy:"namespace=caddy.storage inline_key=module"`
-	}
-	if err := json.Unmarshal(cfg, &top); err != nil {
-		var syn *json.SyntaxError
-		if errors.As(err, &syn) {
-			return caddy.DefaultStorage, nil
-		}
-		return nil, err
-	}
-	if top.StorageRaw == nil {
-		return caddy.DefaultStorage, nil
-	}
-	val, err := ctx.LoadModule(&top, "StorageRaw")
-	if err != nil {
-		return nil, err
-	}
-	return val.(caddy.StorageConverter).CertMagicStorage()
+	return uauthn.RunAdd(o, newStorageBackend(caddy.DefaultStorage, uauthn.PasswdName), os.Stdout)
 }
 
 var (

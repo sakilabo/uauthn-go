@@ -233,13 +233,13 @@ example.com {
 - Requests under `prefix` are answered by uauthn. Other requests pass with `Remote-User` set (any incoming `Remote-User` is removed) and `{http.auth.user.id}` available, or get the redirecting `401`.
 - A request matcher limits the protected requests: `uauthn @protected { ... }`. The directive is ordered before `basic_auth`.
 - The session table is shared through a usage pool, so config reloads keep sessions.
-- Users are managed with a `caddy` subcommand:
+- Users are managed with a `caddy` subcommand. It does not read Caddy's config, so give the `passwd` file with `--passwd_file`:
 
 ```
-caddy uauthn add [--password PASSWORD] [--reset] [--config FILE [--adapter NAME]] [--passwd_file PATH] USERNAME
+caddy uauthn add [--password PASSWORD] [--reset] [--passwd_file PATH] USERNAME
 ```
 
-  It writes `uauthn/passwd` in the storage of the given config, resolved the same way as `caddy storage export`, or the default storage without `--config`. Run it in the same environment as the Caddy process. When the directive sets `passwd_file`, give the same file with `--passwd_file`.
+  Without `--passwd_file`, it writes `uauthn/passwd` in the default storage. This applies only when Caddy uses the default storage (no global `storage` option) and the directive does not set `passwd_file`; run it in the same environment as the Caddy process.
 
 ## License
 

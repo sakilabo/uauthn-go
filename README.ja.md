@@ -233,13 +233,13 @@ example.com {
 - `prefix` の下のリクエストには uauthn が応答します。それ以外は、`Remote-User` を設定し（受け取った `Remote-User` は削除）、`{http.auth.user.id}` を使える状態で次へ渡すか、ログインページへ移す `401` を返します。
 - 保護するリクエストはマッチャーで絞れます：`uauthn @protected { ... }`。ディレクティブの順序は `basic_auth` の前です。
 - セッションの表は usage pool で共有するため、設定を再読み込みしてもセッションは残ります。
-- ユーザーは `caddy` のサブコマンドで管理します：
+- ユーザーは `caddy` のサブコマンドで管理します。サブコマンドは Caddy の設定を読まないため、`passwd` のファイルを `--passwd_file` で指定します：
 
 ```
-caddy uauthn add [--password PASSWORD] [--reset] [--config FILE [--adapter NAME]] [--passwd_file PATH] USERNAME
+caddy uauthn add [--password PASSWORD] [--reset] [--passwd_file PATH] USERNAME
 ```
 
-  指定した設定のストレージ（`caddy storage export` と同じ方法で決める）、`--config` がなければ既定のストレージの `uauthn/passwd` に書き込みます。Caddy のプロセスと同じ環境で実行します。ディレクティブで `passwd_file` を指定している場合は、同じファイルを `--passwd_file` で指定します。
+  `--passwd_file` を省略すると、既定のストレージの `uauthn/passwd` に書き込みます。省略できるのは、Caddy が既定のストレージを使い（グローバルオプション `storage` なし）、ディレクティブで `passwd_file` を指定していない場合で、Caddy のプロセスと同じ環境で実行します。
 
 ## ライセンス
 
