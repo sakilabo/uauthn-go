@@ -45,12 +45,12 @@ func TestConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.PasskeyPrompt != PromptAlways || c.Port != 8080 || c.Prefix != "/auth" || c.Session != SessionFileMode || c.Domain != "example.com" || c.Bind != "0.0.0.0" {
+	if c.PasskeyPrompt != PromptAlways || c.Title != DefaultTitle || c.Port != 8080 || c.Prefix != "/auth" || c.Session != SessionFileMode || c.Domain != "example.com" || c.Bind != "0.0.0.0" {
 		t.Fatalf("unexpected config %+v", c)
 	}
-	os.WriteFile(path, []byte("passkey_prompt = Unregistered\n"), 0o600)
-	if c, err := LoadConfig(dir); err != nil || c.PasskeyPrompt != PromptUnregistered {
-		t.Fatalf("passkey_prompt: %v %q", err, c.PasskeyPrompt)
+	os.WriteFile(path, []byte("passkey_prompt = Unregistered\ntitle = Example sign-in\n"), 0o600)
+	if c, err := LoadConfig(dir); err != nil || c.PasskeyPrompt != PromptUnregistered || c.Title != "Example sign-in" {
+		t.Fatalf("passkey_prompt, title: %v %+v", err, c)
 	}
 	os.WriteFile(path, []byte("passkey_prompt = sometimes\n"), 0o600)
 	if _, err := LoadConfig(dir); err == nil {
@@ -232,7 +232,7 @@ func TestServerFlow(t *testing.T) {
 		a := newAuthenticator(t, alg)
 		var st map[string]any
 		json.Unmarshal(do("GET", "/uauthn/challenge", nil, cookie).Body.Bytes(), &st)
-		if st["user"] != "alice" || st["passkeyPrompt"] != PromptAlways {
+		if st["user"] != "alice" || st["passkeyPrompt"] != PromptAlways || st["title"] != DefaultTitle {
 			t.Fatalf("challenge state %v", st)
 		}
 		cdj, ad, _ := a.response("webauthn.create", st["challenge"].(string), origin, "example.test")

@@ -60,6 +60,7 @@ flush_sec = 5
 log =
 log_max_size = 1048576
 passkey_prompt = always
+title = Sign in
 passwd_file =
 index_file =
 ```
@@ -76,6 +77,7 @@ index_file =
 | `log` | （空） | ログファイル。空なら標準出力、Windows サービスとして動作中はイベントログ |
 | `log_max_size` | `1048576` | ログがこのサイズを超えるとき、`*.old` に名前を変える。`0` で制限なし |
 | `passkey_prompt` | `always` | 戻り先のあるパスワードでのサインインの後、`always` はパスキーの登録を案内する。`unregistered` はパスキーが未登録のときだけ案内する。`never` はすぐに戻る |
+| `title` | `Sign in` | ログインページのタイトルとサインイン画面の見出し |
 | `passwd_file` | （空） | `passwd` ファイル。相対パスはデータディレクトリーが基準 |
 | `index_file` | （空） | ログインページのファイル。相対パスはデータディレクトリーが基準 |
 
@@ -134,6 +136,7 @@ Cookie `uauthn` は `base64url(ユーザー名).base64url(キー)` で、キー�
 | `challenge` | 常に | base64url のチャレンジ。サインイン前はサインイン用、サインイン中は登録用 |
 | `rpId` | 常に | WebAuthn の RP ID（`domain`、またはリクエストのホスト） |
 | `passkeyPrompt` | 常に | `always`・`unregistered`・`never` |
+| `title` | 常に | `title` の値 |
 | `user` | サインイン中 | ユーザー名 |
 | `userId` | サインイン中 | base64url の `SHA-256(ユーザー名)`。`create()` の `user.id` 用 |
 | `exclude` | サインイン中 | 登録済みの credential ID（base64url）。`excludeCredentials` 用 |
@@ -229,6 +232,7 @@ example.com {
 | `session` | `file` | `file` / `storage`：Caddy のストレージの `uauthn/session.dat`。`memory`：設定の再読み込みでは残り、再起動で消える |
 | `flush_sec` | `5` | |
 | `passkey_prompt` | `always` | `always`・`unregistered`・`never` |
+| `title` | `Sign in` | ログインページのタイトルとサインイン画面の見出し。空白を含む場合は引用符で囲む |
 
 - `prefix` の下のリクエストには uauthn が応答します。それ以外は、`Remote-User` を設定し（受け取った `Remote-User` は削除）、`{http.auth.user.id}` を使える状態で次へ渡すか、ログインページへ移す `401` を返します。
 - 保護するリクエストはマッチャーで絞れます：`uauthn @protected { ... }`。ディレクティブの順序は `basic_auth` の前です。

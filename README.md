@@ -60,6 +60,7 @@ flush_sec = 5
 log =
 log_max_size = 1048576
 passkey_prompt = always
+title = Sign in
 passwd_file =
 index_file =
 ```
@@ -76,6 +77,7 @@ index_file =
 | `log` | (empty) | Log file. Empty: standard output, or the Event Log when running as a Windows service |
 | `log_max_size` | `1048576` | When the log would exceed this size, it is renamed to `*.old`. `0`: no limit |
 | `passkey_prompt` | `always` | After a password sign-in with a return URL: `always` offers passkey registration, `unregistered` offers it only when the user has no passkey, `never` returns at once |
+| `title` | `Sign in` | Title of the login page and heading of the sign-in form |
 | `passwd_file` | (empty) | `passwd` file; a relative path is resolved against the data directory |
 | `index_file` | (empty) | Login page file; a relative path is resolved against the data directory |
 
@@ -134,6 +136,7 @@ Paths below `prefix`. The server accepts them with or without the prefix, so the
 | `challenge` | always | base64url challenge; for sign-in when signed out, for registration when signed in |
 | `rpId` | always | WebAuthn RP ID (`domain`, or the request host) |
 | `passkeyPrompt` | always | `always`, `unregistered`, or `never` |
+| `title` | always | Value of `title` |
 | `user` | signed in | User name |
 | `userId` | signed in | base64url `SHA-256(user name)`, for `user.id` in `create()` |
 | `exclude` | signed in | base64url credential IDs already registered, for `excludeCredentials` |
@@ -229,6 +232,7 @@ example.com {
 | `session` | `file` | `file` / `storage`: `uauthn/session.dat` in Caddy's storage. `memory`: kept across config reloads, lost on restart |
 | `flush_sec` | `5` | |
 | `passkey_prompt` | `always` | `always`, `unregistered`, or `never` |
+| `title` | `Sign in` | Title of the login page and heading of the sign-in form; quote it when it contains spaces |
 
 - Requests under `prefix` are answered by uauthn. Other requests pass with `Remote-User` set (any incoming `Remote-User` is removed) and `{http.auth.user.id}` available, or get the redirecting `401`.
 - A request matcher limits the protected requests: `uauthn @protected { ... }`. The directive is ordered before `basic_auth`.

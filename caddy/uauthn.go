@@ -53,6 +53,7 @@ type Handler struct {
 	PasswdFile    string `json:"passwd_file,omitempty"`
 	IndexFile     string `json:"index_file,omitempty"`
 	PasskeyPrompt string `json:"passkey_prompt,omitempty"`
+	Title         string `json:"title,omitempty"`
 
 	server  *uauthn.Server
 	poolKey string
@@ -107,6 +108,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		Expire:        time.Duration(h.ExpiredSec) * time.Second,
 		Index:         fileOrStorage(h.IndexFile, storage, uauthn.IndexName),
 		PasskeyPrompt: h.PasskeyPrompt,
+		Title:         h.Title,
 		Users:         uauthn.NewUsers(fileOrStorage(h.PasswdFile, storage, uauthn.PasswdName)),
 		Sessions:      val.(pooledSessions).Sessions,
 		Logf:          logf,
@@ -176,6 +178,8 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			h.Session = val
 		case "flush_sec":
 			h.FlushSec, err = strconv.Atoi(val)
+		case "title":
+			h.Title = val
 		case "passwd_file":
 			h.PasswdFile = val
 		case "index_file":

@@ -31,6 +31,7 @@ type Options struct {
 	Expire        time.Duration
 	Index         Backend
 	PasskeyPrompt string
+	Title         string
 	Users         *Users
 	Sessions      *Sessions
 	Logf          Logf
@@ -46,6 +47,9 @@ type Server struct {
 func NewServer(opt Options) *Server {
 	if opt.PasskeyPrompt == "" {
 		opt.PasskeyPrompt = PromptAlways
+	}
+	if opt.Title == "" {
+		opt.Title = DefaultTitle
 	}
 	if opt.Logf == nil {
 		opt.Logf = func(string, ...any) {}
@@ -185,7 +189,7 @@ func (s *Server) serveChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	res := map[string]any{"challenge": ch, "rpId": s.rpID(r), "passkeyPrompt": s.opt.PasskeyPrompt}
+	res := map[string]any{"challenge": ch, "rpId": s.rpID(r), "passkeyPrompt": s.opt.PasskeyPrompt, "title": s.opt.Title}
 	if ok {
 		exclude := []string{}
 		for _, pk := range s.opt.Users.Passkeys(user) {

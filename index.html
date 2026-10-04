@@ -25,7 +25,7 @@ p { margin: 0 0 8px; }
 <body>
 <main>
   <section id="signin" hidden>
-    <h1>Sign in</h1>
+    <h1 id="title">Sign in</h1>
     <form id="form">
       <label for="username">User name</label>
       <input id="username" name="username" autocomplete="username webauthn" autocapitalize="none" required>
@@ -75,6 +75,7 @@ async function load() {
   if (pending) pending.abort();
   const res = await fetch('challenge', { cache: 'no-store' });
   state = await res.json();
+  document.title = $('title').textContent = state.title;
   $('signin').hidden = !!state.user;
   $('account').hidden = !state.user;
   if (state.user) {
@@ -126,7 +127,6 @@ $('form').addEventListener('submit', async (ev) => {
     }
     $('register').classList.add('primary');
     $('continue').classList.remove('primary');
-    message('Register a passkey to sign in without a password next time.');
   } catch (e) {
     message(e.message, true);
   }

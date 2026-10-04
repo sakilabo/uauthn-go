@@ -30,6 +30,8 @@ const (
 	PromptNever        = "never"
 )
 
+const DefaultTitle = "Sign in"
+
 type Config struct {
 	Dir           string
 	PasswdFile    string
@@ -44,6 +46,7 @@ type Config struct {
 	Log           string
 	LogMaxSize    int64
 	PasskeyPrompt string
+	Title         string
 }
 
 func DefaultConfig() Config {
@@ -56,6 +59,7 @@ func DefaultConfig() Config {
 		FlushSec:      5,
 		LogMaxSize:    1 << 20,
 		PasskeyPrompt: PromptAlways,
+		Title:         DefaultTitle,
 	}
 }
 
@@ -118,6 +122,8 @@ func (c *Config) set(key, val string) error {
 		c.LogMaxSize, err = strconv.ParseInt(val, 10, 64)
 	case "passkey_prompt":
 		c.PasskeyPrompt = val
+	case "title":
+		c.Title = val
 	case "passwd_file":
 		c.PasswdFile = val
 	case "index_file":

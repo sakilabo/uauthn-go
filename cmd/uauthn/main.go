@@ -146,6 +146,7 @@ func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
 		Expire:         cfg.Expire(),
 		Index:          uauthn.FileBackend{Path: cfg.IndexFile},
 		PasskeyPrompt:  cfg.PasskeyPrompt,
+		Title:          cfg.Title,
 		Users:          uauthn.NewUsers(uauthn.FileBackend{Path: cfg.PasswdFile}),
 		Sessions:       sessions,
 		Logf:           logf,
