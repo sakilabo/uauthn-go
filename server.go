@@ -27,13 +27,14 @@ const (
 type Logf func(format string, args ...any)
 
 type Options struct {
-	Prefix   string
-	Domain   string
-	Expire   time.Duration
-	Index    string
-	Users    *Users
-	Sessions *Sessions
-	Logf     Logf
+	Prefix        string
+	Domain        string
+	Expire        time.Duration
+	Index         string
+	PasskeyPrompt string
+	Users         *Users
+	Sessions      *Sessions
+	Logf          Logf
 	// TrustForwarded takes the scheme and host from X-Forwarded-Proto/Host (standalone behind a proxy).
 	TrustForwarded bool
 }
@@ -44,6 +45,9 @@ type Server struct {
 }
 
 func NewServer(opt Options) *Server {
+	if opt.PasskeyPrompt == "" {
+		opt.PasskeyPrompt = PromptAlways
+	}
 	if opt.Logf == nil {
 		opt.Logf = func(string, ...any) {}
 	}
@@ -182,7 +186,7 @@ func (s *Server) serveChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	res := map[string]any{"challenge": ch, "rpId": s.rpID(r)}
+	res := map[string]any{"challenge": ch, "rpId": s.rpID(r), "passkeyPrompt": s.opt.PasskeyPrompt}
 	if ok {
 		exclude := []string{}
 		for _, pk := range s.opt.Users.Passkeys(user) {

@@ -43,13 +43,14 @@ const storageKey = "uauthn/" + uauthn.SessionFile
 var sessionPool = caddy.NewUsagePool()
 
 type Handler struct {
-	Prefix     string `json:"prefix,omitempty"`
-	Domain     string `json:"domain,omitempty"`
-	ExpiredSec int    `json:"expired_sec,omitempty"`
-	Session    string `json:"session,omitempty"`
-	FlushSec   int    `json:"flush_sec,omitempty"`
-	Passwd     string `json:"passwd,omitempty"`
-	Index      string `json:"index,omitempty"`
+	Prefix        string `json:"prefix,omitempty"`
+	Domain        string `json:"domain,omitempty"`
+	ExpiredSec    int    `json:"expired_sec,omitempty"`
+	Session       string `json:"session,omitempty"`
+	FlushSec      int    `json:"flush_sec,omitempty"`
+	Passwd        string `json:"passwd,omitempty"`
+	Index         string `json:"index,omitempty"`
+	PasskeyPrompt string `json:"passkey_prompt,omitempty"`
 
 	server  *uauthn.Server
 	poolKey string
@@ -72,6 +73,9 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		return err
 	}
 	if h.Session, err = uauthn.NormalizeSessionMode(h.Session); err != nil {
+		return err
+	}
+	if h.PasskeyPrompt, err = uauthn.NormalizePasskeyPrompt(h.PasskeyPrompt); err != nil {
 		return err
 	}
 	if h.ExpiredSec <= 0 {
@@ -107,13 +111,14 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		return err
 	}
 	h.server = uauthn.NewServer(uauthn.Options{
-		Prefix:   h.Prefix,
-		Domain:   h.Domain,
-		Expire:   time.Duration(h.ExpiredSec) * time.Second,
-		Index:    h.Index,
-		Users:    uauthn.NewUsers(h.Passwd),
-		Sessions: val.(pooledSessions).Sessions,
-		Logf:     logf,
+		Prefix:        h.Prefix,
+		Domain:        h.Domain,
+		Expire:        time.Duration(h.ExpiredSec) * time.Second,
+		Index:         h.Index,
+		PasskeyPrompt: h.PasskeyPrompt,
+		Users:         uauthn.NewUsers(h.Passwd),
+		Sessions:      val.(pooledSessions).Sessions,
+		Logf:          logf,
 	})
 	return nil
 }
@@ -177,6 +182,8 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			h.Passwd = val
 		case "index":
 			h.Index = val
+		case "passkey_prompt":
+			h.PasskeyPrompt = val
 		default:
 			return d.Errf("unknown subdirective %q", key)
 		}

@@ -24,27 +24,35 @@ const (
 	SessionFileMode = "file"
 )
 
+const (
+	PromptAlways       = "always"
+	PromptUnregistered = "unregistered"
+	PromptNever        = "never"
+)
+
 type Config struct {
-	Bind       string
-	Port       int
-	Prefix     string
-	Domain     string
-	ExpiredSec int
-	Session    string
-	FlushSec   int
-	Log        string
-	LogMaxSize int64
+	Bind          string
+	Port          int
+	Prefix        string
+	Domain        string
+	ExpiredSec    int
+	Session       string
+	FlushSec      int
+	Log           string
+	LogMaxSize    int64
+	PasskeyPrompt string
 }
 
 func DefaultConfig() Config {
 	return Config{
-		Bind:       "0.0.0.0",
-		Port:       10997,
-		Prefix:     "/uauthn",
-		ExpiredSec: 86400,
-		Session:    SessionFileMode,
-		FlushSec:   5,
-		LogMaxSize: 1 << 20,
+		Bind:          "0.0.0.0",
+		Port:          10997,
+		Prefix:        "/uauthn",
+		ExpiredSec:    86400,
+		Session:       SessionFileMode,
+		FlushSec:      5,
+		LogMaxSize:    1 << 20,
+		PasskeyPrompt: PromptAlways,
 	}
 }
 
@@ -100,6 +108,8 @@ func (c *Config) set(key, val string) error {
 		c.Log = val
 	case "log_max_size":
 		c.LogMaxSize, err = strconv.ParseInt(val, 10, 64)
+	case "passkey_prompt":
+		c.PasskeyPrompt = val
 	default:
 		return fmt.Errorf("unknown key %q", key)
 	}
@@ -115,6 +125,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if c.Session, err = NormalizeSessionMode(c.Session); err != nil {
+		return err
+	}
+	if c.PasskeyPrompt, err = NormalizePasskeyPrompt(c.PasskeyPrompt); err != nil {
 		return err
 	}
 	if c.Port <= 0 || c.Port > 65535 {
@@ -171,4 +184,14 @@ func FindDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".uauthn"), nil
+}
+
+func NormalizePasskeyPrompt(p string) (string, error) {
+	switch v := strings.ToLower(strings.TrimSpace(p)); v {
+	case "":
+		return PromptAlways, nil
+	case PromptAlways, PromptUnregistered, PromptNever:
+		return v, nil
+	}
+	return "", fmt.Errorf("passkey_prompt: unknown value %q", p)
 }

@@ -117,7 +117,16 @@ $('form').addEventListener('submit', async (ev) => {
   message('');
   try {
     await post('login', { type: 'password', username: $('username').value, password: $('password').value });
-    signedIn();
+    if (!rd) return load();
+    await load();
+    const p = state.passkeyPrompt;
+    if (!window.PublicKeyCredential || p === 'never' || (p === 'unregistered' && state.exclude.length > 0)) {
+      location.replace(rd);
+      return;
+    }
+    $('register').classList.add('primary');
+    $('continue').classList.remove('primary');
+    message('Register a passkey to sign in without a password next time.');
   } catch (e) {
     message(e.message, true);
   }
@@ -148,6 +157,10 @@ $('register').addEventListener('click', async () => {
       publicKey: enc(publicKey),
       alg: cred.response.getPublicKeyAlgorithm(),
     });
+    if (rd) {
+      location.replace(rd);
+      return;
+    }
     message('Passkey registered.');
   } catch (e) {
     message(e.message, true);

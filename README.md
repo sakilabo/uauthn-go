@@ -2,9 +2,10 @@
 
 [日本語](README.ja.md)
 
-uauthn is a lightweight implementation for putting passkeys in front of web applications behind a reverse proxy. It signs users in with a passkey (WebAuthn) or a password and tells the proxy who is signed in. It runs as a standalone server for `forward_auth` / `auth_request`, as a Windows service, or as a Caddy module.
+uauthn is a lightweight implementation for putting passkeys in front of web applications behind a reverse proxy. Its purpose is to make passkey authentication easy to adopt: a user signs in once with a password and is then led to register a passkey. It signs users in with a passkey (WebAuthn) or a password and tells the proxy who is signed in. It runs as a standalone server for `forward_auth` / `auth_request`, as a Windows service, or as a Caddy module.
 
 - Passkeys (ES256, RS256, EdDSA) and argon2id passwords, on one login page
+- After a password sign-in, passkey registration is offered before returning to the original page (`passkey_prompt`)
 - Plain files: `config`, `passwd`, `session.dat`, `index.html`
 - Go standard library and `golang.org/x` only; no cgo
 - Browser-only; requires HTTPS (or `http://localhost`)
@@ -58,6 +59,7 @@ session = file
 flush_sec = 5
 log =
 log_max_size = 1048576
+passkey_prompt = always
 ```
 
 | Key | Default | Meaning |
@@ -71,8 +73,13 @@ log_max_size = 1048576
 | `flush_sec` | `5` | Interval for writing `session.dat` |
 | `log` | (empty) | Log file. Empty: standard output, or the Event Log when running as a Windows service |
 | `log_max_size` | `1048576` | When the log would exceed this size, it is renamed to `*.old`. `0`: no limit |
+| `passkey_prompt` | `always` | After a password sign-in with a return URL: `always` offers passkey registration, `unregistered` offers it only when the user has no passkey, `never` returns at once |
 
 The log file is opened for each line, so external rotation may rename or delete it at any time.
+
+### Login page
+
+After a password sign-in, the page reads `passkeyPrompt` from `/challenge` and either shows the passkey registration (with "Continue" to the original page) or returns to the original page. Registering a passkey also returns there. A passkey sign-in returns at once. The default is `always` because the purpose of uauthn is to get users onto passkeys.
 
 ### passwd
 
@@ -115,6 +122,17 @@ Paths below `prefix`. The server accepts them with or without the prefix, so the
 | `/passkey` | POST | Registers a passkey for the signed-in user |
 | `/logout` | GET, POST | Ends the session; redirects to `rd` (a local path) or the login page |
 | `/auth` | GET | For the proxy: `200` with `Remote-User`, or `401` |
+
+`/challenge` returns JSON; a custom `index.html` reads the same fields. Each challenge is single-use and valid for 10 minutes.
+
+| Field | When | Content |
+| --- | --- | --- |
+| `challenge` | always | base64url challenge; for sign-in when signed out, for registration when signed in |
+| `rpId` | always | WebAuthn RP ID (`domain`, or the request host) |
+| `passkeyPrompt` | always | `always`, `unregistered`, or `never` |
+| `user` | signed in | User name |
+| `userId` | signed in | base64url `SHA-256(user name)`, for `user.id` in `create()` |
+| `exclude` | signed in | base64url credential IDs already registered, for `excludeCredentials` |
 
 Without a valid session, `/auth` answers `401` with an HTML body that redirects to `<prefix>/?rd=<original URI>`. The original URI is taken from `X-Forwarded-Uri`, then `X-Original-URI`. The scheme and host for the WebAuthn origin are taken from `X-Forwarded-Proto` / `X-Forwarded-Host`.
 
@@ -203,6 +221,7 @@ example.com {
 | `expired_sec` | `86400` | |
 | `session` | `file` | `file` / `storage`: `uauthn/session.dat` in Caddy's storage. `memory`: kept across config reloads, lost on restart |
 | `flush_sec` | `5` | |
+| `passkey_prompt` | `always` | `always`, `unregistered`, or `never` |
 
 - Requests under `prefix` are answered by uauthn. Other requests pass with `Remote-User` set (any incoming `Remote-User` is removed) and `{http.auth.user.id}` available, or get the redirecting `401`.
 - A request matcher limits the protected requests: `uauthn @protected { ... }`. The directive is ordered before `basic_auth`.

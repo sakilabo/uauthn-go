@@ -143,6 +143,7 @@ func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
 		Domain:         cfg.Domain,
 		Expire:         cfg.Expire(),
 		Index:          filepath.Join(dir, uauthn.IndexFile),
+		PasskeyPrompt:  cfg.PasskeyPrompt,
 		Users:          uauthn.NewUsers(filepath.Join(dir, uauthn.PasswdFile)),
 		Sessions:       sessions,
 		Logf:           logf,

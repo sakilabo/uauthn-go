@@ -2,9 +2,10 @@
 
 [English](README.md)
 
-uauthn は、リバースプロキシの後ろにある Web アプリケーションでパスキーを簡単に使うための軽量な実装です。パスキー（WebAuthn）またはパスワードでサインインさせ、サインインしているユーザーをプロキシに伝えます。`forward_auth` / `auth_request` 用の単体のサーバー、Windows サービス、Caddy のモジュールとして動作します。
+uauthn は、リバースプロキシの後ろにある Web アプリケーションでパスキーを簡単に使うための軽量な実装です。目的は、パスキー認証を簡単に導入できるようにすることです。ユーザーは一度パスワードでサインインすると、そのままパスキーの登録へ案内されます。パスキー（WebAuthn）またはパスワードでサインインさせ、サインインしているユーザーをプロキシに伝えます。`forward_auth` / `auth_request` 用の単体のサーバー、Windows サービス、Caddy のモジュールとして動作します。
 
 - パスキー（ES256・RS256・EdDSA）と argon2id のパスワードを、1つのログインページで扱う
+- パスワードでサインインした後、元のページへ戻る前にパスキーの登録を案内する（`passkey_prompt`）
 - 単純なファイル：`config`・`passwd`・`session.dat`・`index.html`
 - 依存は Go の標準ライブラリと `golang.org/x` のみ。cgo 不要
 - ブラウザー専用。HTTPS（または `http://localhost`）が必要
@@ -58,6 +59,7 @@ session = file
 flush_sec = 5
 log =
 log_max_size = 1048576
+passkey_prompt = always
 ```
 
 | キー | 既定値 | 内容 |
@@ -71,8 +73,13 @@ log_max_size = 1048576
 | `flush_sec` | `5` | `session.dat` を書き込む間隔 |
 | `log` | （空） | ログファイル。空なら標準出力、Windows サービスとして動作中はイベントログ |
 | `log_max_size` | `1048576` | ログがこのサイズを超えるとき、`*.old` に名前を変える。`0` で制限なし |
+| `passkey_prompt` | `always` | 戻り先のあるパスワードでのサインインの後、`always` はパスキーの登録を案内する。`unregistered` はパスキーが未登録のときだけ案内する。`never` はすぐに戻る |
 
 ログファイルは1行ごとに開いて閉じるため、外部のローテーションがいつでも名前の変更や削除をできます。
+
+### ログインページ
+
+パスワードでサインインした後、ページは `/challenge` の `passkeyPrompt` を読み、パスキーの登録（元のページへ戻る「Continue」付き）を表示するか、元のページへ戻ります。パスキーを登録した場合も元のページへ戻ります。パスキーでサインインした場合はすぐに戻ります。既定値が `always` なのは、uauthn の目的がユーザーをパスキーへ移すことだからです。
 
 ### passwd
 
@@ -115,6 +122,17 @@ Cookie `uauthn` は `base64url(ユーザー名).base64url(キー)` で、キー�
 | `/passkey` | POST | サインイン中のユーザーにパスキーを登録する |
 | `/logout` | GET・POST | セッションを終了し、`rd`（ローカルのパス）かログインページへ転送する |
 | `/auth` | GET | プロキシ用。`200` と `Remote-User`、または `401` |
+
+`/challenge` は JSON を返します。独自の `index.html` も同じ項目を読めます。チャレンジは1回だけ使え、有効期間は10分です。
+
+| 項目 | 返す条件 | 内容 |
+| --- | --- | --- |
+| `challenge` | 常に | base64url のチャレンジ。サインイン前はサインイン用、サインイン中は登録用 |
+| `rpId` | 常に | WebAuthn の RP ID（`domain`、またはリクエストのホスト） |
+| `passkeyPrompt` | 常に | `always`・`unregistered`・`never` |
+| `user` | サインイン中 | ユーザー名 |
+| `userId` | サインイン中 | base64url の `SHA-256(ユーザー名)`。`create()` の `user.id` 用 |
+| `exclude` | サインイン中 | 登録済みの credential ID（base64url）。`excludeCredentials` 用 |
 
 有効なセッションがなければ、`/auth` は `<prefix>/?rd=<元の URI>` へ移る HTML を本文にした `401` を返します。元の URI は `X-Forwarded-Uri`、次に `X-Original-URI` から取ります。WebAuthn の origin に使うスキームとホストは、`X-Forwarded-Proto` / `X-Forwarded-Host` から取ります。
 
@@ -203,6 +221,7 @@ example.com {
 | `expired_sec` | `86400` | |
 | `session` | `file` | `file` / `storage`：Caddy のストレージの `uauthn/session.dat`。`memory`：設定の再読み込みでは残り、再起動で消える |
 | `flush_sec` | `5` | |
+| `passkey_prompt` | `always` | `always`・`unregistered`・`never` |
 
 - `prefix` の下のリクエストには uauthn が応答します。それ以外は、`Remote-User` を設定し（受け取った `Remote-User` は削除）、`{http.auth.user.id}` を使える状態で次へ渡すか、ログインページへ移す `401` を返します。
 - 保護するリクエストはマッチャーで絞れます：`uauthn @protected { ... }`。ディレクティブの順序は `basic_auth` の前です。
