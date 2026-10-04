@@ -1,0 +1,5 @@
+/.vscode/
+/.claude/
+*.exe
+*.tar.gz
+*.zip

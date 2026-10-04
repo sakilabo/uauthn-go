@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<style>
+:root { color-scheme: light dark; --fg: #1f2328; --muted: #656d76; --bg: #f6f8fa; --card: #fff; --line: #d0d7de; --accent: #0969da; --error: #cf222e; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --muted: #8d96a0; --bg: #0d1117; --card: #161b22; --line: #30363d; --accent: #4493f8; --error: #f85149; } }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+main { width: min(360px, calc(100vw - 32px)); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 24px; }
+h1 { font-size: 20px; margin: 0 0 16px; }
+label { display: block; margin: 12px 0 4px; color: var(--muted); font-size: 13px; }
+input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+button, .button { display: block; width: 100%; margin-top: 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: center; text-decoration: none; cursor: pointer; }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+p { margin: 0 0 8px; }
+.muted { color: var(--muted); font-size: 13px; }
+#message { min-height: 1.5em; margin-top: 12px; font-size: 13px; }
+#message.error { color: var(--error); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="signin" hidden>
+    <h1>Sign in</h1>
+    <form id="form">
+      <label for="username">User name</label>
+      <input id="username" name="username" autocomplete="username webauthn" autocapitalize="none" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+    <button id="passkey-signin" type="button">Sign in with a passkey</button>
+  </section>
+  <section id="account" hidden>
+    <h1>Signed in</h1>
+    <p>User: <strong id="user"></strong></p>
+    <p class="muted" id="passkeys"></p>
+    <a id="continue" class="button primary" hidden>Continue</a>
+    <button id="register" type="button">Register a passkey</button>
+    <a id="logout" class="button" href="logout">Sign out</a>
+  </section>
+  <div id="message" role="status"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const enc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const dec = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const rdParam = new URLSearchParams(location.search).get('rd');
+const rd = rdParam && rdParam.startsWith('/') && !rdParam.startsWith('//') && !rdParam.startsWith('/\\') ? rdParam : '';
+let state = null;
+let pending = null;
+
+function message(text, error) {
+  $('message').textContent = text || '';
+  $('message').className = error ? 'error' : '';
+}
+
+async function post(path, body) {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function signedIn() {
+  if (rd) location.replace(rd);
+  else load();
+}
+
+async function load() {
+  if (pending) pending.abort();
+  const res = await fetch('challenge', { cache: 'no-store' });
+  state = await res.json();
+  $('signin').hidden = !!state.user;
+  $('account').hidden = !state.user;
+  if (state.user) {
+    $('user').textContent = state.user;
+    $('passkeys').textContent = state.exclude.length + ' passkey(s) registered';
+    if (rd) { $('continue').href = rd; $('continue').hidden = false; }
+    $('logout').href = 'logout' + (rd ? '?rd=' + encodeURIComponent(location.pathname + location.search) : '');
+  } else if (window.PublicKeyCredential && PublicKeyCredential.isConditionalMediationAvailable && await PublicKeyCredential.isConditionalMediationAvailable()) {
+    passkeySignIn('conditional');
+  }
+}
+
+async function passkeySignIn(mediation) {
+  if (pending) pending.abort();
+  pending = new AbortController();
+  try {
+    const cred = await navigator.credentials.get({
+      mediation,
+      signal: pending.signal,
+      publicKey: { challenge: dec(state.challenge), rpId: state.rpId, userVerification: 'preferred', allowCredentials: [] },
+    });
+    pending = null;
+    await post('login', {
+      type: 'passkey',
+      id: enc(cred.rawId),
+      clientDataJSON: enc(cred.response.clientDataJSON),
+      authenticatorData: enc(cred.response.authenticatorData),
+      signature: enc(cred.response.signature),
+    });
+    signedIn();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    message(e.message, true);
+    load();
+  }
+}
+
+$('form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  message('');
+  try {
+    await post('login', { type: 'password', username: $('username').value, password: $('password').value });
+    signedIn();
+  } catch (e) {
+    message(e.message, true);
+  }
+});
+
+$('passkey-signin').addEventListener('click', () => { message(''); passkeySignIn('optional'); });
+
+$('register').addEventListener('click', async () => {
+  message('');
+  try {
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge: dec(state.challenge),
+        rp: { id: state.rpId, name: location.hostname },
+        user: { id: dec(state.userId), name: state.user, displayName: state.user },
+        pubKeyCredParams: [-7, -257, -8].map((alg) => ({ type: 'public-key', alg })),
+        authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+        excludeCredentials: state.exclude.map((id) => ({ type: 'public-key', id: dec(id) })),
+        attestation: 'none',
+      },
+    });
+    const publicKey = cred.response.getPublicKey();
+    if (!publicKey) throw new Error('The authenticator returned an unsupported key type.');
+    await post('passkey', {
+      id: enc(cred.rawId),
+      clientDataJSON: enc(cred.response.clientDataJSON),
+      authenticatorData: enc(cred.response.getAuthenticatorData()),
+      publicKey: enc(publicKey),
+      alg: cred.response.getPublicKeyAlgorithm(),
+    });
+    message('Passkey registered.');
+  } catch (e) {
+    message(e.message, true);
+  }
+  load();
+});
+
+load().catch((e) => message(e.message, true));
+</script>
+</body>
+</html>
