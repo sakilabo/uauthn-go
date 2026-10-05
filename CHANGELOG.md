@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-05
+
+### Fixed
+
+- `rd` of `/logout` and the login page could redirect to another site, because browsers drop tabs and newlines from a URL (`/%09/example.com` became `//example.com`). A value containing a control character is no longer used.
+
 ## [0.4.0] - 2026-10-05
 
 Versions 0.1.0 to 0.3.1 are retracted. `passwd` and `session.dat` of those versions cannot be used; create `passwd` again.
