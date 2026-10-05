@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-05
+
+Versions 0.1.0 to 0.3.1 are retracted. `passwd` and `session.dat` of those versions cannot be used; create `passwd` again.
+
+### Added
+
+- `--data_dir DIR` option for the standalone `listen`, `add`, and `install`. When given, neither the executable's directory nor `~/.uauthn` is searched. `install` registers the service with this option.
+- `log_generations` setting (default `3`) for the number of old logs the standalone server keeps.
+- `uauthn index` and `caddy uauthn index` write the built-in login page to the `--output` file, or to standard output without it.
+
+### Changed
+
+- `passwd` starts each user line with a unique random UID (8 hex digits), followed by the user name and the credentials. A line without a UID is an error.
+- The session ID is the UID (32 bits) followed by 224 random bits, and the cookie holds only the session ID. `session.dat` records the session ID itself (version 2, all numbers big endian); a file of the earlier version is discarded.
+- The WebAuthn `user.id` is the UID.
+- The standalone `config` key `log` is renamed to `log_file`.
+- The default of `expired_sec` is `259200` (3 days) instead of `86400`.
+- The shared package moved from the module root to `internal/uauthn`, so other modules can no longer import it.
+- The release archives no longer include `index.html`.
+- An old log of the standalone server is renamed to `*.1` (then `*.2`, `*.3`, ...) instead of `*.old`.
+- The help of `uauthn add` and `caddy uauthn add` lists `--data_dir` / `--passwd_file` first and `USERNAME` last.
+
+### Fixed
+
+- The release workflow created an empty draft release besides the published one.
+
 ## [0.3.1] - 2026-10-05
 
 ### Added

@@ -2,10 +2,13 @@ module github.com/sakilabo/uauthn-go/caddy
 
 go 1.26.0
 
+// The passwd and session formats of these versions are not supported from v0.4.0.
+retract [v0.1.0, v0.3.1]
+
 require (
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/caddyserver/certmagic v0.25.6
-	github.com/sakilabo/uauthn-go v0.3.1
+	github.com/sakilabo/uauthn-go v0.4.0
 	github.com/spf13/cobra v1.10.2
 )
 
