@@ -1,8 +1,8 @@
 package uauthn
 
 import (
-	"crypto/sha256"
 	_ "embed"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"html"
@@ -91,11 +91,15 @@ func (s *Server) Authenticate(r *http.Request) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	user, key, ok := ParseSessionValue(c.Value)
-	if !ok || !s.opt.Users.Exists(user) {
+	id, ok := parseSessionValue(c.Value)
+	if !ok {
 		return "", false
 	}
-	return user, s.opt.Sessions.Check(user, key, s.opt.Expire)
+	user, ok := s.opt.Users.Name(id.uid())
+	if !ok {
+		return "", false
+	}
+	return user, s.opt.Sessions.Check(id, s.opt.Expire)
 }
 
 // A 401 whose body redirects to the login page works with Caddy and Traefik as is, and with nginx via error_page.
@@ -173,9 +177,8 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func userID(name string) string {
-	h := sha256.Sum256([]byte(name))
-	return b64url.EncodeToString(h[:])
+func userID(uid uint32) string {
+	return b64url.EncodeToString(binary.BigEndian.AppendUint32(nil, uid))
 }
 
 func (s *Server) serveChallenge(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +199,8 @@ func (s *Server) serveChallenge(w http.ResponseWriter, r *http.Request) {
 			exclude = append(exclude, b64url.EncodeToString(pk.ID))
 		}
 		res["user"] = user
-		res["userId"] = userID(user)
+		uid, _ := s.opt.Users.UID(user)
+		res["userId"] = userID(uid)
 		res["exclude"] = exclude
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -262,7 +266,12 @@ func (s *Server) serveLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "sign-in failed")
 		return
 	}
-	value, err := s.opt.Sessions.Create(user)
+	uid, ok := s.opt.Users.UID(user)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "sign-in failed")
+		return
+	}
+	value, err := s.opt.Sessions.Create(uid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -345,8 +354,9 @@ func (s *Server) verifyRegistration(r *http.Request, req *loginRequest, user str
 
 func (s *Server) serveLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(CookieName); err == nil {
-		if user, key, ok := ParseSessionValue(c.Value); ok {
-			s.opt.Sessions.Delete(user, key)
+		if id, ok := parseSessionValue(c.Value); ok {
+			s.opt.Sessions.Delete(id)
+			user, _ := s.opt.Users.Name(id.uid())
 			s.opt.Logf("logout: user=%q remote=%s", user, r.RemoteAddr)
 		}
 	}

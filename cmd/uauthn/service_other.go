@@ -10,6 +10,6 @@ func isWindowsService() bool { return false }
 
 func runService() error { return errNotWindows }
 
-func installService() error { return errNotWindows }
+func installService(string) error { return errNotWindows }
 
 func uninstallService() error { return errNotWindows }

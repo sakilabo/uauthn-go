@@ -16,10 +16,10 @@ import (
 	"github.com/caddyserver/certmagic"
 	"github.com/spf13/cobra"
 
-	"github.com/sakilabo/uauthn-go"
+	"github.com/sakilabo/uauthn-go/internal/uauthn"
 )
 
-const commandUsage = uauthn.AddUsage + " [--passwd_file PATH]"
+const commandUsage = "add [--passwd_file PATH] " + uauthn.AddUsage + " | index " + uauthn.IndexUsage
 
 func init() {
 	caddy.RegisterModule(Handler{})
@@ -28,11 +28,12 @@ func init() {
 	caddycmd.RegisterCommand(caddycmd.Command{
 		Name:  "uauthn",
 		Usage: commandUsage,
-		Short: "Manages users of the uauthn handler",
-		Long: "Adds a user to uauthn's passwd or replaces the user's password.\n" +
+		Short: "Manages users and the login page of the uauthn handler",
+		Long: "add adds a user to uauthn's passwd or replaces the user's password.\n" +
 			"The passwd is the file given by --passwd_file, or \"uauthn/passwd\" in the default storage.\n" +
 			"Without --password, the password is read from the terminal twice.\n" +
-			"--reset removes every credential of the user, including passkeys.",
+			"--reset removes every credential of the user, including passkeys.\n" +
+			"index writes the built-in login page to the --output file, or to standard output without it.",
 		CobraFunc: func(cmd *cobra.Command) {
 			cmd.DisableFlagParsing = true
 			cmd.RunE = func(_ *cobra.Command, args []string) error { return runCommand(args) }
@@ -231,6 +232,9 @@ func (s storageBackend) Store(data []byte) error {
 }
 
 func runCommand(args []string) error {
+	if len(args) > 0 && args[0] == "index" {
+		return uauthn.RunIndex(args[1:], os.Stdout)
+	}
 	if len(args) == 0 || args[0] != "add" {
 		return fmt.Errorf("usage: caddy uauthn %s", commandUsage)
 	}

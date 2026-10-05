@@ -2,13 +2,15 @@
 
 [日本語](README.ja.md)
 
-uauthn is a lightweight implementation for putting passkeys in front of web applications behind a reverse proxy. Its purpose is to make passkey authentication easy to adopt: a user signs in once with a password and is then led to register a passkey. It signs users in with a passkey (WebAuthn) or a password and tells the proxy who is signed in. It runs as a standalone server for `forward_auth` / `auth_request`, as a Windows service, or as a Caddy module.
+uauthn is a lightweight implementation for using passkeys easily in web applications behind a reverse proxy.
+
+uauthn runs as a standalone server for `forward_auth` / `auth_request`, as a Windows service, or as a Caddy module. It supports passwords and passkeys (WebAuthn), and offers passkey registration to users who sign in with a password.
 
 - Passkeys (ES256, RS256, EdDSA) and argon2id passwords, on one login page
 - After a password sign-in, passkey registration is offered before returning to the original page (`passkey_prompt`)
-- Plain files: `config`, `passwd`, `session.dat`, `index.html`
+- Simple file layout: `config`, `passwd`, `session.dat`, `index.html`
 - Go standard library and `golang.org/x` only; no cgo
-- Browser-only; requires HTTPS (or `http://localhost`)
+- A simple, browser-only implementation.
 
 ## Standalone server
 
@@ -22,43 +24,46 @@ go install github.com/sakilabo/uauthn-go/cmd/uauthn@latest
 
 ### Commands
 
-```
-uauthn listen [[ADDR:]PORT]
-uauthn add [--password PASSWORD] [--reset] USERNAME
-uauthn install | uninstall      (Windows service)
+```sh
+uauthn listen [--data_dir DIR] [[ADDR:]PORT]
+uauthn add [--data_dir DIR] [--password PASSWORD] [--reset] USERNAME
+uauthn install [--data_dir DIR] | uninstall      (Windows service)
+uauthn index --output FILE
 uauthn version
 ```
 
 - `listen`: an address given here overrides `bind` / `port`.
-- `add`: creates the user or replaces the user's password. Without `--password`, the password is read from the terminal twice. `--reset` drops every credential of the user, passkeys included. There is no other editing command; edit `passwd` directly or reset.
+- `add`: creates the user or replaces the user's password. Without `--password`, the password is read from the terminal twice. `--reset` drops every credential of the user, passkeys included, and creates it again. There is no other editing command; edit `passwd` directly or reset.
+- `index`: writes the built-in login page to the `--output` file (`uauthn index --output index.html`).
 
 ### Data directory
 
-The executable's directory when it contains a regular file named `config` or `passwd`; otherwise `~/.uauthn`.
+The data directory can be given with `--data_dir`. Without it, the executable's directory is chosen when it contains a `config` or `passwd` file; otherwise `~/.uauthn` is chosen.
 
-| File | Content | Location |
-| --- | --- | --- |
-| `config` | Settings (optional) | Data directory |
-| `passwd` | Users and credentials | `passwd_file`, otherwise the data directory |
-| `index.html` | Login page (optional; the embedded page is used when absent) | `index_file`, otherwise the data directory |
-| `session.dat` | Session times (`session = file`) | Data directory |
+| File | Content |
+| --- | --- |
+| `config` | Settings (optional) |
+| `passwd` | Users and credentials |
+| `index.html` | Login page (optional; the embedded page is used when absent) |
+| `session.dat` | Session times (`session = file`) |
 
-When `passwd_file` or `index_file` is set, no other location is searched. An existing file is rewritten in place, so `passwd` and `session.dat` may be symbolic links.
+`passwd` and `index.html` can be placed anywhere by setting `passwd_file` and `index_file`.
 
-### config
+### config file
 
-INI without sections. `#` or `;` starts a comment line.
+INI without sections. Lines starting with `#` or `;` are comments.
 
 ```ini
 bind = 0.0.0.0
 port = 10997
 prefix = /uauthn
 domain =
-expired_sec = 86400
+expired_sec = 259200
 session = file
 flush_sec = 5
-log =
+log_file =
 log_max_size = 1048576
+log_generations = 3
 passkey_prompt = always
 title = Sign in
 passwd_file =
@@ -71,50 +76,53 @@ index_file =
 | `port` | `10997` | Listen port |
 | `prefix` | `/uauthn` | Public path of the login page and its endpoints |
 | `domain` | (empty) | Cookie `Domain` and the WebAuthn RP ID. Empty: host-only cookie, RP ID = request host |
-| `expired_sec` | `86400` | A session expires this many seconds after its last confirmation |
+| `expired_sec` | `259200` | Expiry of a session ID: seconds since authentication was last confirmed |
 | `session` | `file` | `file` (alias `storage`) or `memory` |
-| `flush_sec` | `5` | Interval for writing `session.dat` |
-| `log` | (empty) | Log file. Empty: standard output, or the Event Log when running as a Windows service |
-| `log_max_size` | `1048576` | When the log would exceed this size, it is renamed to `*.old`. `0`: no limit |
-| `passkey_prompt` | `always` | After a password sign-in with a return URL: `always` offers passkey registration, `unregistered` offers it only when the user has no passkey, `never` returns at once |
+| `flush_sec` | `5` | Interval in seconds for synchronizing `session.dat` with the storage |
+| `log_file` | (empty) | Log file. Empty: standard output, or the Event Log while running as a Windows service |
+| `log_max_size` | `1048576` | The log file is rotated when it exceeds this size. `0`: no limit |
+| `log_generations` | `3` | Number of old logs kept (`*.1` to `*.N`). `0`: none are kept |
+| `passkey_prompt` | `always` | How passkey registration is offered after a password sign-in: `always` always offers it, `unregistered` offers it when the user has no passkey, `never` does not offer it. |
 | `title` | `Sign in` | Title of the login page and heading of the sign-in form |
 | `passwd_file` | (empty) | `passwd` file; a relative path is resolved against the data directory |
-| `index_file` | (empty) | Login page file; a relative path is resolved against the data directory |
+| `index_file` | (empty) | `index.html` file; a relative path is resolved against the data directory |
 
-The log file is opened for each line, so external rotation may rename or delete it at any time.
+### passwd file
 
-### Login page
-
-After a password sign-in, the page reads `passkeyPrompt` from `/challenge` and either shows the passkey registration (with "Continue" to the original page) or returns to the original page. Registering a passkey also returns there. A passkey sign-in returns at once. The default is `always` because the purpose of uauthn is to get users onto passkeys.
-
-### passwd
-
-One user per line: the user name, then any number of credentials separated by tabs, in no particular order. Lines starting with `#` are kept as they are.
+One user per line: the UID and the user name, then several credentials separated by tabs. Sign-in succeeds when any one of the credentials matches.
 
 ```
-alice	$argon2id$v=19$m=47104,t=1,p=1$<salt>$<hash>	passkey:<credential ID>:<alg>:<public key>
+1a2b3c4d	alice	$argon2id$v=19$m=47104,t=1,p=1$<salt>$<hash>	passkey:<credential ID>:<alg>:<public key>
 ```
 
-- Password: argon2id in the PHC format, the same as Caddy `basic_auth` (`caddy hash-password --algorithm argon2id`). Several hashes may be listed; any of them matches.
-- Passkey: `passkey:` + credential ID (base64url) + COSE algorithm (`-7`, `-257`, `-8`) + SubjectPublicKeyInfo (base64url). Added from the login page.
-- The file is re-read when its size or modification time changes.
+- UID: a 32-bit value unique to each user, generated automatically by the `add` command.
+- Password: argon2id in the PHC format, the same as Caddy `basic_auth`. Set by the `add` command.
+- Passkey: `passkey:` + credential ID (base64url) + COSE algorithm (`-7`, `-257`, `-8`) + SubjectPublicKeyInfo (base64url). Registered from the login page.
+- Lines starting with `#` are ignored as comments.
 
-### Sessions
+### session.dat file
 
-The cookie `uauthn` carries `base64url(user).base64url(key)` with a 32-byte random key (`Path=/`, `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS). `session.dat` holds only the last confirmation time of each session, keyed by `SHA-256(user + key)`; each request that passes moves the time forward.
+`session.dat` is a binary file that records, for each session ID, the date and time when authentication was last confirmed.
 
-`session.dat` layout (little endian):
+The session ID is a 256-bit value made of the UID (32 bits) and random bits (224 bits). This value is set in the cookie `uauthn` in base64url (`Path=/`, `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS).
+
+Header:
 
 | Offset | Size | Content |
 | --- | --- | --- |
 | 0 | 6 | `UAUTHN` |
-| 6 | 2 | Version (`1`) |
-| 8 + 40n | 32 | `SHA-256(user + key)` |
-| 40 + 40n | 8 | Unix time of the last confirmation |
+| 6 | 2 | Version (`2`, big endian) |
 
-- The number of records is a multiple of 16; a record with an all-zero key or time 0 is empty.
-- The table lives in memory and is written every `flush_sec`. Before writing, a file changed elsewhere is read and merged (newer time wins). A file whose size is not `8 + 40 × 16k` is discarded and overwritten from memory.
-- A user removed from `passwd` loses its sessions immediately.
+Record (40 bytes from offset `8 + 40n`):
+
+| Offset in the record | Size | Content |
+| --- | --- | --- |
+| 0 | 32 | Session ID (the first 4 bytes are the UID, big endian) |
+| 32 | 8 | Date and time when authentication was last confirmed (Unix time, big endian) |
+
+- The number of records is a multiple of 16; a record with an all-zero session ID or time 0 is empty.
+- The table lives in memory and is synchronized with the storage every `flush_sec`. When the content or size of the file is invalid, the file is overwritten from memory.
+- The sessions of a user removed from `passwd` become invalid immediately.
 
 ### Endpoints
 
@@ -138,10 +146,16 @@ Paths below `prefix`. The server accepts them with or without the prefix, so the
 | `passkeyPrompt` | always | `always`, `unregistered`, or `never` |
 | `title` | always | Value of `title` |
 | `user` | signed in | User name |
-| `userId` | signed in | base64url `SHA-256(user name)`, for `user.id` in `create()` |
+| `userId` | signed in | base64url UID (4 bytes), for `user.id` in `create()` |
 | `exclude` | signed in | base64url credential IDs already registered, for `excludeCredentials` |
 
 Without a valid session, `/auth` answers `401` with an HTML body that redirects to `<prefix>/?rd=<original URI>`. The original URI is taken from `X-Forwarded-Uri`, then `X-Original-URI`. The scheme and host for the WebAuthn origin are taken from `X-Forwarded-Proto` / `X-Forwarded-Host`.
+
+### Login page
+
+A passkey sign-in returns to the page the sign-in started from.
+
+After a password sign-in, the standard `index` page reads `passkeyPrompt` (`passkey_prompt` in config) from `/challenge` and, following the setting, shows the passkey registration page or returns to the page the sign-in started from.
 
 ### Reverse proxy
 
@@ -195,15 +209,15 @@ Traefik: a `forwardAuth` middleware with `address: http://127.0.0.1:10997/auth` 
 ## Windows service
 
 ```
-uauthn install
+uauthn install [--data_dir DIR]
 uauthn uninstall
 ```
 
-`install` registers the service `uauthn` (automatic start, LocalSystem, `listen` with `config`) and the Event Log source `uauthn`; it needs administrator rights. `uninstall` stops and removes both. As LocalSystem, `~` is `C:\Windows\System32\config\systemprofile`, so keep `config` and `passwd` next to the executable. Without `log`, messages go to the Application log.
+`install` registers the service `uauthn` (automatic start, LocalSystem, `listen` with `config`) and the Event Log source `uauthn`; with `--data_dir`, the service uses that directory. It needs administrator rights. `uninstall` stops and removes both. As LocalSystem, `~` is `C:\Windows\System32\config\systemprofile`, so placing `config` and `passwd` next to the executable or giving `--data_dir` is recommended. Without `log_file`, messages are written to the Application log.
 
 ## Caddy module
 
-The module `http.handlers.uauthn` serves the login page and checks the session inside Caddy, without a separate process or `forward_auth`. Its files live in Caddy's storage under `uauthn/`, so no file location needs to be managed.
+The module `http.handlers.uauthn` serves the login page and checks the session inside Caddy, without a separate process or `forward_auth`. Its files live in Caddy's storage under `uauthn/`, so there is no file location to manage either.
 
 ```sh
 xcaddy build --with github.com/sakilabo/uauthn-go/caddy
@@ -212,6 +226,25 @@ xcaddy build --with github.com/sakilabo/uauthn-go/caddy
 ```caddyfile
 example.com {
 	uauthn
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+An example with values given in subdirectives:
+
+```caddyfile
+example.com {
+	uauthn {
+		prefix /signin
+		domain example.com
+		expired_sec 604800
+		session file
+		flush_sec 10
+		passkey_prompt unregistered
+		title "Example sign in"
+		passwd_file /etc/uauthn/passwd
+		index_file /etc/uauthn/index.html
+	}
 	reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -225,25 +258,24 @@ example.com {
 | Subdirective | Default | |
 | --- | --- | --- |
 | `prefix` | `/uauthn` | Path of the login page and its endpoints |
-| `passwd_file` | (empty) | Use this file instead of `uauthn/passwd` |
-| `index_file` | (empty) | Use this file instead of `uauthn/index.html` |
+| `passwd_file` | (empty) | When not given, `uauthn/passwd` in Caddy's storage is chosen |
+| `index_file` | (empty) | When not given, `uauthn/index.html` in Caddy's storage is chosen |
 | `domain` | (empty) | Cookie `Domain` and RP ID |
-| `expired_sec` | `86400` | |
+| `expired_sec` | `259200` | Expiry of a session ID: seconds since authentication was last confirmed |
 | `session` | `file` | `file` / `storage`: `uauthn/session.dat` in Caddy's storage. `memory`: kept across config reloads, lost on restart |
-| `flush_sec` | `5` | |
+| `flush_sec` | `5` | Interval in seconds for synchronizing `uauthn/session.dat` with Caddy's storage |
 | `passkey_prompt` | `always` | `always`, `unregistered`, or `never` |
-| `title` | `Sign in` | Title of the login page and heading of the sign-in form; quote it when it contains spaces |
+| `title` | `"Sign in"` | Title of the login page and heading of the sign-in form; quote it when it contains spaces |
 
 - Requests under `prefix` are answered by uauthn. Other requests pass with `Remote-User` set (any incoming `Remote-User` is removed) and `{http.auth.user.id}` available, or get the redirecting `401`.
 - A request matcher limits the protected requests: `uauthn @protected { ... }`. The directive is ordered before `basic_auth`.
-- The session table is shared through a usage pool, so config reloads keep sessions.
-- Users are managed with a `caddy` subcommand. It does not read Caddy's config, so give the `passwd` file with `--passwd_file`:
+- Users are managed with a `caddy` subcommand. The subcommand does not read Caddy's config, so give the `passwd` file with `--passwd_file`. When `--passwd_file` is omitted, Caddy's default storage is chosen.
 
-```
-caddy uauthn add [--password PASSWORD] [--reset] [--passwd_file PATH] USERNAME
+```sh
+caddy uauthn add [--passwd_file PATH] [--password PASSWORD] [--reset] USERNAME
 ```
 
-  Without `--passwd_file`, it writes `uauthn/passwd` in the default storage. This applies only when Caddy uses the default storage (no global `storage` option) and the directive does not set `passwd_file`; run it in the same environment as the Caddy process.
+- `caddy uauthn index --output FILE` writes the built-in login page to a file.
 
 ## License
 

@@ -7,11 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/sakilabo/uauthn-go"
+	"github.com/sakilabo/uauthn-go/internal/uauthn"
 )
 
 func signalContext() (context.Context, context.CancelFunc) {
@@ -19,14 +20,14 @@ func signalContext() (context.Context, context.CancelFunc) {
 }
 
 func newLogger(cfg uauthn.Config) uauthn.Logf {
-	if cfg.Log == "" {
+	if cfg.LogFile == "" {
 		return log.New(os.Stdout, "", log.LstdFlags).Printf
 	}
-	path := cfg.Log
+	path := cfg.LogFile
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(cfg.Dir, path)
 	}
-	fl := &fileLogger{path: path, max: cfg.LogMaxSize}
+	fl := &fileLogger{path: path, max: cfg.LogMaxSize, gens: cfg.LogGenerations}
 	return fl.printf
 }
 
@@ -35,6 +36,7 @@ type fileLogger struct {
 	mu   sync.Mutex
 	path string
 	max  int64
+	gens int
 }
 
 func (l *fileLogger) printf(format string, args ...any) {
@@ -43,8 +45,7 @@ func (l *fileLogger) printf(format string, args ...any) {
 	defer l.mu.Unlock()
 	if l.max > 0 {
 		if st, err := os.Stat(l.path); err == nil && st.Size()+int64(len(line)) > l.max {
-			os.Remove(l.path + ".old")
-			os.Rename(l.path, l.path+".old")
+			l.rotate()
 		}
 	}
 	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
@@ -54,4 +55,16 @@ func (l *fileLogger) printf(format string, args ...any) {
 	}
 	f.WriteString(line)
 	f.Close()
+}
+
+func (l *fileLogger) rotate() {
+	if l.gens == 0 {
+		os.Remove(l.path)
+		return
+	}
+	os.Remove(l.path + "." + strconv.Itoa(l.gens))
+	for i := l.gens - 1; i >= 1; i-- {
+		os.Rename(l.path+"."+strconv.Itoa(i), l.path+"."+strconv.Itoa(i+1))
+	}
+	os.Rename(l.path, l.path+".1")
 }

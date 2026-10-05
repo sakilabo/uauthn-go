@@ -35,10 +35,25 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "$bin" ./cmd/uauthn
           out="uauthn-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}"
           if [ "$GOOS" = windows ]; then
-            zip "$out.zip" "$bin" index.html README.md README.ja.md LICENSE
+            zip "$out.zip" "$bin" README.md README.ja.md LICENSE
           else
-            tar czf "$out.tar.gz" "$bin" index.html README.md README.ja.md LICENSE
+            tar czf "$out.tar.gz" "$bin" README.md README.ja.md LICENSE
           fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: uauthn-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: uauthn-*-${{ matrix.goos }}-${{ matrix.goarch }}.*
+
+  # One job creates the release; parallel matrix jobs each creating it leave duplicate drafts.
+  release:
+    needs: build
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: uauthn-*
+          merge-multiple: true
       - name: extract changelog
         run: awk '/^## \[/{if(p)exit; p=1} p' CHANGELOG.md > RELEASE_NOTES.md
       - uses: softprops/action-gh-release@v3

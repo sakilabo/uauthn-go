@@ -7,11 +7,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sakilabo/uauthn-go"
+	"github.com/sakilabo/uauthn-go/internal/uauthn"
 )
 
 var version = "dev"
@@ -19,13 +20,14 @@ var version = "dev"
 const usage = `uauthn - lightweight passkey and password authentication for reverse proxies
 
 Usage:
-  uauthn listen [[ADDR:]PORT]
-  uauthn ` + uauthn.AddUsage + `
-  uauthn install      (Windows) register the Windows service
-  uauthn uninstall    (Windows) remove the Windows service
+  uauthn listen [--data_dir DIR] [[ADDR:]PORT]
+  uauthn add [--data_dir DIR] ` + uauthn.AddUsage + `
+  uauthn install [--data_dir DIR]   (Windows) register the Windows service
+  uauthn uninstall                  (Windows) remove the Windows service
+  uauthn index ` + uauthn.IndexUsage + `      write the built-in login page to FILE or standard output
   uauthn version
 
-Data directory: the executable's directory when it holds config or passwd, otherwise ~/.uauthn
+Data directory: --data_dir; otherwise the executable's directory when it holds config or passwd, otherwise ~/.uauthn
 `
 
 func main() {
@@ -43,30 +45,45 @@ func run(args []string) int {
 		fmt.Fprint(os.Stderr, usage)
 		return 2
 	}
-	var err error
-	switch args[0] {
+	cmd := args[0]
+	dir, rest, err := parseDataDir(args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "uauthn:", err)
+		return 2
+	}
+	if dir != "" && cmd != "listen" && cmd != "add" && cmd != "install" {
+		fmt.Fprint(os.Stderr, usage)
+		return 2
+	}
+	switch cmd {
 	case "listen":
-		if len(args) > 2 {
+		if len(rest) > 1 {
 			fmt.Fprint(os.Stderr, usage)
 			return 2
 		}
 		addr := ""
-		if len(args) == 2 {
-			addr = args[1]
+		if len(rest) == 1 {
+			addr = rest[0]
 		}
 		ctx, stop := signalContext()
 		defer stop()
-		err = listen(ctx, addr, nil)
+		err = listen(ctx, addr, dir, nil)
 	case "add":
-		err = add(args[1:])
+		err = add(rest, dir)
 		if errors.Is(err, errUsage) {
 			fmt.Fprint(os.Stderr, usage)
 			return 2
 		}
 	case "install":
-		err = installService()
+		if len(rest) > 0 {
+			fmt.Fprint(os.Stderr, usage)
+			return 2
+		}
+		err = installService(dir)
 	case "uninstall":
 		err = uninstallService()
+	case "index":
+		err = uauthn.RunIndex(rest, os.Stdout)
 	case "version", "--version", "-v":
 		fmt.Println("uauthn", version)
 	case "help", "--help", "-h":
@@ -84,7 +101,36 @@ func run(args []string) int {
 
 var errUsage = errors.New("usage")
 
-func add(args []string) error {
+// The path is made absolute because install hands it to a service that runs in another working directory.
+func parseDataDir(args []string) (string, []string, error) {
+	var dir string
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		name, val, hasVal := strings.Cut(args[i], "=")
+		if name != "--data_dir" && name != "-data_dir" {
+			rest = append(rest, args[i])
+			continue
+		}
+		if !hasVal {
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("%s needs a value", name)
+			}
+			i++
+			val = args[i]
+		}
+		if val == "" {
+			return "", nil, fmt.Errorf("%s must not be empty", name)
+		}
+		abs, err := filepath.Abs(val)
+		if err != nil {
+			return "", nil, err
+		}
+		dir = abs
+	}
+	return dir, rest, nil
+}
+
+func add(args []string, dataDir string) error {
 	o, err := uauthn.ParseAddArgs(args, nil)
 	if err != nil {
 		if len(args) == 0 {
@@ -92,14 +138,17 @@ func add(args []string) error {
 		}
 		return err
 	}
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(dataDir)
 	if err != nil {
 		return err
 	}
 	return uauthn.RunAdd(o, uauthn.FileBackend{Path: cfg.PasswdFile}, os.Stdout)
 }
 
-func loadConfig() (uauthn.Config, error) {
+func loadConfig(dataDir string) (uauthn.Config, error) {
+	if dataDir != "" {
+		return uauthn.LoadConfig(dataDir)
+	}
 	dir, err := uauthn.FindDir()
 	if err != nil {
 		return uauthn.Config{}, err
@@ -120,8 +169,8 @@ func listenAddr(cfg uauthn.Config, arg string) (string, error) {
 	return arg, nil
 }
 
-func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
-	cfg, err := loadConfig()
+func listen(ctx context.Context, addrArg, dataDir string, logf uauthn.Logf) error {
+	cfg, err := loadConfig(dataDir)
 	if err != nil {
 		return err
 	}
@@ -129,7 +178,7 @@ func listen(ctx context.Context, addrArg string, logf uauthn.Logf) error {
 	if err != nil {
 		return err
 	}
-	if logf == nil || cfg.Log != "" {
+	if logf == nil || cfg.LogFile != "" {
 		logf = newLogger(cfg)
 	}
 

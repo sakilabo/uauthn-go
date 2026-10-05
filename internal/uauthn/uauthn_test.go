@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,7 +70,7 @@ func TestConfig(t *testing.T) {
 
 func TestPasswd(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "passwd")
-	os.WriteFile(path, []byte("# users\nalice\tpasskey:AQID:-7:BAUG\textra\n"), 0o600)
+	os.WriteFile(path, []byte("# users\n0000000a\talice\tpasskey:AQID:-7:BAUG\textra\n"), 0o600)
 	u := NewUsers(FileBackend{Path: path})
 	if _, err := u.SetPassword("alice", "$argon2id$x", false); err != nil {
 		t.Fatal(err)
@@ -77,27 +78,41 @@ func TestPasswd(t *testing.T) {
 	if created, _ := u.SetPassword("bob", "$argon2id$y", false); !created {
 		t.Fatal("bob not created")
 	}
+	bob, ok := u.UID("bob")
+	if !ok || bob == 0x0a {
+		t.Fatalf("bob UID %08x %v", bob, ok)
+	}
 	got, _ := os.ReadFile(path)
-	want := "# users\nalice\t$argon2id$x\tpasskey:AQID:-7:BAUG\textra\nbob\t$argon2id$y\n"
+	want := fmt.Sprintf("# users\n0000000a\talice\t$argon2id$x\tpasskey:AQID:-7:BAUG\textra\n%08x\tbob\t$argon2id$y\n", bob)
 	if string(got) != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+	if name, ok := u.Name(0x0a); !ok || name != "alice" {
+		t.Fatalf("Name: %q %v", name, ok)
 	}
 	if user, pk, ok := u.FindPasskey([]byte{1, 2, 3}); !ok || user != "alice" || pk.Alg != -7 {
 		t.Fatalf("FindPasskey: %v %v %v", user, pk, ok)
 	}
 	u.SetPassword("alice", "$argon2id$z", true)
 	got, _ = os.ReadFile(path)
-	if !strings.Contains(string(got), "alice\t$argon2id$z\n") {
+	if !strings.Contains(string(got), "0000000a\talice\t$argon2id$z\n") {
 		t.Fatalf("reset failed: %q", got)
+	}
+
+	for _, bad := range []string{"alice\t$argon2id$x\n", "0000000a\n", "0000000a\talice\n0000000a\tbob\n"} {
+		os.WriteFile(path, []byte(bad), 0o600)
+		if _, err := u.SetPassword("carol", "$argon2id$c", false); err == nil {
+			t.Fatalf("invalid passwd accepted: %q", bad)
+		}
 	}
 }
 
 func TestSessionFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.dat")
 	s := NewSessions(FileBackend{Path: path}, time.Hour, t.Logf)
-	v, _ := s.Create("alice")
-	user, key, ok := ParseSessionValue(v)
-	if !ok || user != "alice" || !s.Check(user, key, time.Hour) {
+	v, _ := s.Create(0x0a)
+	id, ok := parseSessionValue(v)
+	if !ok || id.uid() != 0x0a || !s.Check(id, time.Hour) {
 		t.Fatal("session not valid")
 	}
 	s.Flush()
@@ -107,19 +122,19 @@ func TestSessionFile(t *testing.T) {
 	}
 
 	other := NewSessions(FileBackend{Path: path}, time.Hour, t.Logf)
-	if !other.Check(user, key, time.Hour) {
+	if !other.Check(id, time.Hour) {
 		t.Fatal("session not loaded from file")
 	}
-	v2, _ := other.Create("bob")
+	v2, _ := other.Create(0x0b)
 	other.Flush()
 	time.Sleep(20 * time.Millisecond)
-	s.Delete(user, key)
+	s.Delete(id)
 	s.Flush()
-	_, key2, _ := ParseSessionValue(v2)
-	if !s.Check("bob", key2, time.Hour) {
-		t.Fatal("merge lost bob")
+	id2, _ := parseSessionValue(v2)
+	if !s.Check(id2, time.Hour) {
+		t.Fatal("merge lost the second session")
 	}
-	if s.Check(user, key, time.Hour) {
+	if s.Check(id, time.Hour) {
 		t.Fatal("deleted session resurrected")
 	}
 	other.Close()
@@ -260,5 +275,24 @@ func TestServerFlow(t *testing.T) {
 	}
 	if _, ok := srv.Authenticate(r); ok {
 		t.Fatal("session survived logout")
+	}
+}
+
+func TestRunIndex(t *testing.T) {
+	var b bytes.Buffer
+	if err := RunIndex(nil, &b); err != nil || !bytes.Equal(b.Bytes(), defaultIndex) {
+		t.Fatalf("stdout: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "index.html")
+	if err := RunIndex([]string{"--output", path}, &b); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, defaultIndex) {
+		t.Fatal("file differs from the built-in page")
+	}
+	for _, bad := range [][]string{{"--output"}, {"--output="}, {"extra"}} {
+		if err := RunIndex(bad, &b); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
 	}
 }

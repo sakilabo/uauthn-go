@@ -2,13 +2,15 @@
 
 [English](README.md)
 
-uauthn は、リバースプロキシの後ろにある Web アプリケーションでパスキーを簡単に使うための軽量な実装です。目的は、パスキー認証を簡単に導入できるようにすることです。ユーザーは一度パスワードでサインインすると、そのままパスキーの登録へ案内されます。パスキー（WebAuthn）またはパスワードでサインインさせ、サインインしているユーザーをプロキシに伝えます。`forward_auth` / `auth_request` 用の単体のサーバー、Windows サービス、Caddy のモジュールとして動作します。
+uauthn は、リバースプロキシの後ろにある Web アプリケーションでパスキーを簡単に使うための軽量な実装です。
+
+uauthn は、`forward_auth` / `auth_request` 用の単体のサーバー、Windows サービス、Caddy のモジュールとして動作します。パスワードとパスキー（WebAuthn）に対応していて、パスワードでサインインしたユーザーにはパスキーの登録を案内するようになっています。
 
 - パスキー（ES256・RS256・EdDSA）と argon2id のパスワードを、1つのログインページで扱う
 - パスワードでサインインした後、元のページへ戻る前にパスキーの登録を案内する（`passkey_prompt`）
-- 単純なファイル：`config`・`passwd`・`session.dat`・`index.html`
+- 単純なファイル構成：`config`・`passwd`・`session.dat`・`index.html`
 - 依存は Go の標準ライブラリと `golang.org/x` のみ。cgo 不要
-- ブラウザー専用。HTTPS（または `http://localhost`）が必要
+- ブラウザー専用のシンプルな実装。
 
 ## 単体のサーバー
 
@@ -22,30 +24,32 @@ go install github.com/sakilabo/uauthn-go/cmd/uauthn@latest
 
 ### コマンド
 
-```
-uauthn listen [[ADDR:]PORT]
-uauthn add [--password PASSWORD] [--reset] USERNAME
-uauthn install | uninstall      (Windows サービス)
+```sh
+uauthn listen [--data_dir DIR] [[ADDR:]PORT]
+uauthn add [--data_dir DIR] [--password PASSWORD] [--reset] USERNAME
+uauthn install [--data_dir DIR] | uninstall      (Windows サービス)
+uauthn index --output FILE
 uauthn version
 ```
 
 - `listen`：引数のアドレスは `bind` / `port` より優先します。
 - `add`：ユーザーを作成するか、ユーザーのパスワードを置き換えます。`--password` がなければ、端末からパスワードを2回読み取ります。`--reset` は、パスキーを含むユーザーの認証情報をすべて消してから作り直します。ほかの編集コマンドはありません。`passwd` を直接編集するか、リセットします。
+- `index`：組み込みのログインページを `--output` のファイルに書き出します（`uauthn index --output index.html`）。
 
 ### データディレクトリー
 
-実行ファイルのディレクトリーに、通常のファイルの `config` か `passwd` があればそこ、なければ `~/.uauthn` です。
+データディレクトリーは `--data_dir` で指定できます。指定がない場合、実行ファイルのディレクトリーに `config` または `passwd` ファイルがあれば、実行ファイルのディレクトリーが選択されます。それ以外の場合は `~/.uauthn` が選択されます。 
 
-| ファイル | 内容 | 場所 |
-| --- | --- | --- |
-| `config` | 設定（省略可） | データディレクトリー |
-| `passwd` | ユーザーと認証情報 | `passwd_file`。なければデータディレクトリー |
-| `index.html` | ログインページ（省略可。なければ組み込みのページ） | `index_file`。なければデータディレクトリー |
-| `session.dat` | セッションの時刻（`session = file`） | データディレクトリー |
+| ファイル | 内容 |
+| --- | --- |
+| `config` | 設定（省略可） |
+| `passwd` | ユーザーと認証情報 |
+| `index.html` | ログインページ（省略可。なければ組み込みのページ） |
+| `session.dat` | セッションの時刻（`session = file`） |
 
-`passwd_file` か `index_file` を指定した場合、ほかの場所は探しません。既存のファイルはその場で書き換えるため、`passwd` と `session.dat` はシンボリックリンクにできます。
+`passwd` と `index.html` は、それぞれ `passwd_file` と `index_file` を指定することで、任意の場所に移動できます。
 
-### config
+### config ファイル
 
 セクションのない INI 形式です。`#` か `;` で始まる行はコメントです。
 
@@ -54,11 +58,12 @@ bind = 0.0.0.0
 port = 10997
 prefix = /uauthn
 domain =
-expired_sec = 86400
+expired_sec = 259200
 session = file
 flush_sec = 5
-log =
+log_file =
 log_max_size = 1048576
+log_generations = 3
 passkey_prompt = always
 title = Sign in
 passwd_file =
@@ -71,50 +76,53 @@ index_file =
 | `port` | `10997` | 待ち受けポート |
 | `prefix` | `/uauthn` | ログインページとエンドポイントの公開パス |
 | `domain` | （空） | Cookie の `Domain` と WebAuthn の RP ID。空なら host-only cookie、RP ID はリクエストのホスト |
-| `expired_sec` | `86400` | 最後の確認からこの秒数でセッションが切れる |
+| `expired_sec` | `259200` | セッション ID の有効期限。最後に認証が確認されてからの秒数 |
 | `session` | `file` | `file`（別名 `storage`）か `memory` |
-| `flush_sec` | `5` | `session.dat` を書き込む間隔 |
-| `log` | （空） | ログファイル。空なら標準出力、Windows サービスとして動作中はイベントログ |
-| `log_max_size` | `1048576` | ログがこのサイズを超えるとき、`*.old` に名前を変える。`0` で制限なし |
-| `passkey_prompt` | `always` | 戻り先のあるパスワードでのサインインの後、`always` はパスキーの登録を案内する。`unregistered` はパスキーが未登録のときだけ案内する。`never` はすぐに戻る |
+| `flush_sec` | `5` | `session.dat` をストレージと同期する間隔（秒） |
+| `log_file` | （空） | ログファイル。空なら標準出力、または Windows サービス動作中はイベントログ |
+| `log_max_size` | `1048576` | ログファイルがこのサイズを超えるとローテーションする。`0` で制限なし |
+| `log_generations` | `3` | 残す古いログの数（`*.1`～`*.N`）。`0` なら残さない |
+| `passkey_prompt` | `always` | パスワードでサインインした場合に、パスキーの登録を案内する動作の設定。`always` は常に、`unregistered` はパスキーが未登録のときに案内する。`never` は案内しない。 |
 | `title` | `Sign in` | ログインページのタイトルとサインイン画面の見出し |
 | `passwd_file` | （空） | `passwd` ファイル。相対パスはデータディレクトリーが基準 |
-| `index_file` | （空） | ログインページのファイル。相対パスはデータディレクトリーが基準 |
+| `index_file` | （空） | `index.html` ファイル。相対パスはデータディレクトリーが基準 |
 
-ログファイルは1行ごとに開いて閉じるため、外部のローテーションがいつでも名前の変更や削除をできます。
+### passwd ファイル
 
-### ログインページ
-
-パスワードでサインインした後、ページは `/challenge` の `passkeyPrompt` を読み、パスキーの登録（元のページへ戻る「Continue」付き）を表示するか、元のページへ戻ります。パスキーを登録した場合も元のページへ戻ります。パスキーでサインインした場合はすぐに戻ります。既定値が `always` なのは、uauthn の目的がユーザーをパスキーへ移すことだからです。
-
-### passwd
-
-1ユーザー1行です。ユーザー名の後に、認証情報をタブ区切りで任意の数、順不同に並べます。`#` で始まる行はそのまま残します。
+1ユーザー1行です。UID とユーザー名の後に、複数の認証情報がタブ区切りで並んでいます。認証情報は、どれか1つでも合致すれば認証成功となります。
 
 ```
-alice	$argon2id$v=19$m=47104,t=1,p=1$<salt>$<hash>	passkey:<credential ID>:<alg>:<public key>
+1a2b3c4d	alice	$argon2id$v=19$m=47104,t=1,p=1$<salt>$<hash>	passkey:<credential ID>:<alg>:<public key>
 ```
 
-- パスワード：PHC 形式の argon2id。Caddy の `basic_auth` と同じ形式です（`caddy hash-password --algorithm argon2id`）。複数並べた場合、どれかに一致すれば通ります。
-- パスキー：`passkey:` ＋ credential ID（base64url）＋ COSE のアルゴリズム（`-7`・`-257`・`-8`）＋ SubjectPublicKeyInfo（base64url）。ログインページから追加します。
-- ファイルのサイズか更新日時が変わると読み直します。
+- UID：ユーザーごとにユニークな32ビットの値。`add` コマンドで自動的に生成されます。
+- パスワード：PHC 形式の argon2id。Caddy の `basic_auth` と同じ形式です。`add` コマンドが設定します。
+- パスキー：`passkey:` ＋ credential ID（base64url）＋ COSE のアルゴリズム（`-7`・`-257`・`-8`）＋ SubjectPublicKeyInfo（base64url）。ログインページから登録します。
+- `#` で始まる行はコメントとして無視されます。
 
-### セッション
+### session.dat ファイル
 
-Cookie `uauthn` は `base64url(ユーザー名).base64url(キー)` で、キーは32バイトの乱数です（`Path=/`・`HttpOnly`・`SameSite=Lax`、HTTPS では `Secure`）。`session.dat` は、`SHA-256(ユーザー名 + キー)` ごとに最後の確認時刻だけを持ちます。確認が通るたびに時刻を進めます。
+`session.dat` は、セッション ID 毎に「最後に認証が確認された日時」が記録されているバイナリファイルです。
 
-`session.dat` の構造（リトルエンディアン）：
+セッション ID は、UID（32ビット）と乱数（224ビット）を合わせた256ビットの値です。この値は、Cookie `uauthn` に base64url で設定されます。（`Path=/`・`HttpOnly`・`SameSite=Lax`、HTTPS では `Secure`）。
+
+ヘッダー：
 
 | オフセット | サイズ | 内容 |
 | --- | --- | --- |
 | 0 | 6 | `UAUTHN` |
-| 6 | 2 | バージョン（`1`） |
-| 8 + 40n | 32 | `SHA-256(ユーザー名 + キー)` |
-| 40 + 40n | 8 | 最後の確認時刻（Unix 時刻） |
+| 6 | 2 | バージョン（`2`、ビッグエンディアン） |
 
-- レコード数は16の倍数です。キーがすべて0、または時刻が0のレコードは空きです。
-- 表はメモリーに持ち、`flush_sec` ごとに書き込みます。書き込みの前に、ほかで変更されたファイルを読み込んでマージします（新しい時刻を採用）。サイズが `8 + 40 × 16k` でないファイルは破棄し、メモリーの内容で上書きします。
-- `passwd` から削除したユーザーのセッションは、すぐに無効になります。
+レコード（オフセット `8 + 40n` から40バイト）：
+
+| レコード内のオフセット | サイズ | 内容 |
+| --- | --- | --- |
+| 0 | 32 | セッション ID（先頭4バイトは UID、ビッグエンディアン） |
+| 32 | 8 | 最後に認証が確認された日時（Unix 時刻、ビッグエンディアン） |
+
+- レコード数は16の倍数です。セッション ID がすべて0、または時刻が0のレコードは空きです。
+- 表はメモリーに持ち、`flush_sec` ごとにストレージと同期します。ファイルの内容やサイズに問題があった場合には、メモリーの内容でファイルを上書きします。
+- `passwd` から削除したユーザーのセッション情報は、すぐに無効になります。
 
 ### エンドポイント
 
@@ -138,10 +146,16 @@ Cookie `uauthn` は `base64url(ユーザー名).base64url(キー)` で、キー�
 | `passkeyPrompt` | 常に | `always`・`unregistered`・`never` |
 | `title` | 常に | `title` の値 |
 | `user` | サインイン中 | ユーザー名 |
-| `userId` | サインイン中 | base64url の `SHA-256(ユーザー名)`。`create()` の `user.id` 用 |
+| `userId` | サインイン中 | base64url の UID（4バイト）。`create()` の `user.id` 用 |
 | `exclude` | サインイン中 | 登録済みの credential ID（base64url）。`excludeCredentials` 用 |
 
-有効なセッションがなければ、`/auth` は `<prefix>/?rd=<元の URI>` へ移る HTML を本文にした `401` を返します。元の URI は `X-Forwarded-Uri`、次に `X-Original-URI` から取ります。WebAuthn の origin に使うスキームとホストは、`X-Forwarded-Proto` / `X-Forwarded-Host` から取ります。
+有効なセッションがなければ、`/auth` は `<prefix>/?rd=<元の URI>` へ移る HTML を本文にした `401` を返します。元の URI は `X-Forwarded-Uri`、次に `X-Original-URI` から取得します。WebAuthn の origin に使うスキームとホストは、`X-Forwarded-Proto` / `X-Forwarded-Host` から取得します。
+
+### ログインページ
+
+パスキーでサインインした場合は、サインイン元のページに戻ります。
+
+パスワードでサインインした場合、標準の `index` ページは `/challenge` の `passkeyPrompt`（config の `passkey_prompt`）を読み、設定に従ってパスキーの登録ページを表示するか、サインイン元のページへ戻ります。
 
 ### リバースプロキシ
 
@@ -195,15 +209,15 @@ Traefik：`address: http://127.0.0.1:10997/auth`、`authResponseHeaders: [Remote
 ## Windows サービス
 
 ```
-uauthn install
+uauthn install [--data_dir DIR]
 uauthn uninstall
 ```
 
-`install` は、サービス `uauthn`（自動起動、LocalSystem、`config` に従って `listen`）とイベントログのソース `uauthn` を登録します。管理者権限が必要です。`uninstall` は両方を停止・削除します。LocalSystem では `~` が `C:\Windows\System32\config\systemprofile` になるため、`config` と `passwd` は実行ファイルと同じディレクトリーに置きます。`log` を指定しなければ、アプリケーションログに出力します。
+`install` は、サービス `uauthn`（自動起動、LocalSystem、`config` に従って `listen`）とイベントログのソース `uauthn` を登録します。`--data_dir` を指定すると、サービスはそのディレクトリーを使います。管理者権限が必要です。`uninstall` は両方を停止・削除します。LocalSystem では `~` が `C:\Windows\System32\config\systemprofile` になるため、`config` と `passwd` は実行ファイルと同じディレクトリーに置くか、`--data_dir` で指定することが推奨されます。`log_file` を指定しなければ、アプリケーションログに出力されます。
 
 ## Caddy モジュール
 
-モジュール `http.handlers.uauthn` は、ログインページとセッションの確認を Caddy の中で処理します。別のプロセスも `forward_auth` も使いません。ファイルは Caddy のストレージの `uauthn/` の下に置くため、ファイルの場所を管理する必要はありません。
+モジュール `http.handlers.uauthn` は、ログインページとセッションの確認を Caddy の中で処理します。別のプロセスも `forward_auth` も使いません。ファイルは Caddy のストレージの `uauthn/` の下に置くため、ファイルの場所を管理する必要もありません。
 
 ```sh
 xcaddy build --with github.com/sakilabo/uauthn-go/caddy
@@ -212,6 +226,25 @@ xcaddy build --with github.com/sakilabo/uauthn-go/caddy
 ```caddyfile
 example.com {
 	uauthn
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+サブディレクティブで値を指定する例：
+
+```caddyfile
+example.com {
+	uauthn {
+		prefix /signin
+		domain example.com
+		expired_sec 604800
+		session file
+		flush_sec 10
+		passkey_prompt unregistered
+		title "Example sign in"
+		passwd_file /etc/uauthn/passwd
+		index_file /etc/uauthn/index.html
+	}
 	reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -225,25 +258,24 @@ example.com {
 | サブディレクティブ | 既定値 | |
 | --- | --- | --- |
 | `prefix` | `/uauthn` | ログインページとエンドポイントのパス |
-| `passwd_file` | （空） | `uauthn/passwd` の代わりにこのファイルを使う |
-| `index_file` | （空） | `uauthn/index.html` の代わりにこのファイルを使う |
+| `passwd_file` | （空） | 指定がなければ Caddy ストレージの `uauthn/passwd` が選択される |
+| `index_file` | （空） | 指定がなければ Caddy ストレージの `uauthn/index.html` が選択される |
 | `domain` | （空） | Cookie の `Domain` と RP ID |
-| `expired_sec` | `86400` | |
+| `expired_sec` | `259200` | セッション ID の有効期限。最後に認証が確認されてからの秒数 |
 | `session` | `file` | `file` / `storage`：Caddy のストレージの `uauthn/session.dat`。`memory`：設定の再読み込みでは残り、再起動で消える |
-| `flush_sec` | `5` | |
+| `flush_sec` | `5` | `uauthn/session.dat` を Caddy のストレージと同期する間隔（秒） |
 | `passkey_prompt` | `always` | `always`・`unregistered`・`never` |
-| `title` | `Sign in` | ログインページのタイトルとサインイン画面の見出し。空白を含む場合は引用符で囲む |
+| `title` | `"Sign in"` | ログインページのタイトルとサインイン画面の見出し。空白を含む場合は引用符で囲む |
 
 - `prefix` の下のリクエストには uauthn が応答します。それ以外は、`Remote-User` を設定し（受け取った `Remote-User` は削除）、`{http.auth.user.id}` を使える状態で次へ渡すか、ログインページへ移す `401` を返します。
 - 保護するリクエストはマッチャーで絞れます：`uauthn @protected { ... }`。ディレクティブの順序は `basic_auth` の前です。
-- セッションの表は usage pool で共有するため、設定を再読み込みしてもセッションは残ります。
-- ユーザーは `caddy` のサブコマンドで管理します。サブコマンドは Caddy の設定を読まないため、`passwd` のファイルを `--passwd_file` で指定します：
+- ユーザーは `caddy` のサブコマンドで管理します。サブコマンドは Caddy の設定を読まないため、`passwd` のファイルを `--passwd_file` で指定してください。`--passwd_file` が省略された場合は Caddy の既定のストレージが選択されます。
 
-```
-caddy uauthn add [--password PASSWORD] [--reset] [--passwd_file PATH] USERNAME
+```sh
+caddy uauthn add [--passwd_file PATH] [--password PASSWORD] [--reset] USERNAME
 ```
 
-  `--passwd_file` を省略すると、既定のストレージの `uauthn/passwd` に書き込みます。省略できるのは、Caddy が既定のストレージを使い（グローバルオプション `storage` なし）、ディレクティブで `passwd_file` を指定していない場合で、Caddy のプロセスと同じ環境で実行します。
+- `caddy uauthn index --output FILE` は、組み込みのログインページをファイルに書き出します。
 
 ## ライセンス
 

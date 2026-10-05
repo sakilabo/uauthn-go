@@ -3,35 +3,26 @@ package uauthn
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"io/fs"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
 
-// Only the last confirmation time is stored; the user and key live in the cookie (record key = SHA-256(user+key)).
 const (
 	sessionMagic   = "UAUTHN"
-	sessionVersion = 1
+	sessionVersion = 2
 	sessionHeader  = 8
 	sessionRecord  = 40
 	sessionBlock   = 16
 )
 
+// A session ID is the user's UID (4 bytes) followed by 28 random bytes, so the ID alone identifies the user.
 type sessionID [32]byte
 
-func sessionKey(user string, key []byte) sessionID {
-	h := sha256.New()
-	h.Write([]byte(user))
-	h.Write(key)
-	var id sessionID
-	h.Sum(id[:0])
-	return id
-}
+func (id sessionID) uid() uint32 { return binary.BigEndian.Uint32(id[:4]) }
 
 func encodeSessions(m map[sessionID]int64) []byte {
 	ids := make([]sessionID, 0, len(m))
@@ -45,18 +36,18 @@ func encodeSessions(m map[sessionID]int64) []byte {
 	}
 	buf := make([]byte, sessionHeader+n*sessionRecord)
 	copy(buf, sessionMagic)
-	binary.LittleEndian.PutUint16(buf[6:], sessionVersion)
+	binary.BigEndian.PutUint16(buf[6:], sessionVersion)
 	for i, id := range ids {
 		r := buf[sessionHeader+i*sessionRecord:]
 		copy(r, id[:])
-		binary.LittleEndian.PutUint64(r[32:], uint64(m[id]))
+		binary.BigEndian.PutUint64(r[32:], uint64(m[id]))
 	}
 	return buf
 }
 
 func decodeSessions(data []byte) (map[sessionID]int64, bool) {
 	if len(data) < sessionHeader || string(data[:6]) != sessionMagic ||
-		binary.LittleEndian.Uint16(data[6:]) != sessionVersion {
+		binary.BigEndian.Uint16(data[6:]) != sessionVersion {
 		return nil, false
 	}
 	body := len(data) - sessionHeader
@@ -67,7 +58,7 @@ func decodeSessions(data []byte) (map[sessionID]int64, bool) {
 	for off := sessionHeader; off < len(data); off += sessionRecord {
 		var id sessionID
 		copy(id[:], data[off:])
-		t := int64(binary.LittleEndian.Uint64(data[off+32:]))
+		t := int64(binary.BigEndian.Uint64(data[off+32:]))
 		if t == 0 || id == (sessionID{}) {
 			continue
 		}
@@ -138,35 +129,31 @@ func (s *Sessions) Close() {
 	}
 }
 
-func (s *Sessions) Create(user string) (string, error) {
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
+func (s *Sessions) Create(uid uint32) (string, error) {
+	var id sessionID
+	binary.BigEndian.PutUint32(id[:4], uid)
+	if _, err := rand.Read(id[4:]); err != nil {
 		return "", err
 	}
-	id := sessionKey(user, key)
 	s.mu.Lock()
 	s.m[id] = time.Now().Unix()
 	delete(s.deleted, id)
 	s.dirty = true
 	s.mu.Unlock()
-	return b64url.EncodeToString([]byte(user)) + "." + b64url.EncodeToString(key), nil
+	return b64url.EncodeToString(id[:]), nil
 }
 
-func ParseSessionValue(v string) (string, []byte, bool) {
-	u, k, ok := strings.Cut(v, ".")
-	if !ok {
-		return "", nil, false
+func parseSessionValue(v string) (sessionID, bool) {
+	var id sessionID
+	b, err := b64url.DecodeString(v)
+	if err != nil || len(b) != len(id) {
+		return id, false
 	}
-	user, err1 := b64url.DecodeString(u)
-	key, err2 := b64url.DecodeString(k)
-	if err1 != nil || err2 != nil || len(key) != 32 || len(user) == 0 {
-		return "", nil, false
-	}
-	return string(user), key, true
+	copy(id[:], b)
+	return id, true
 }
 
-func (s *Sessions) Check(user string, key []byte, expire time.Duration) bool {
-	id := sessionKey(user, key)
+func (s *Sessions) Check(id sessionID, expire time.Duration) bool {
 	now := time.Now().Unix()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -188,8 +175,7 @@ func (s *Sessions) Check(user string, key []byte, expire time.Duration) bool {
 	return true
 }
 
-func (s *Sessions) Delete(user string, key []byte) {
-	id := sessionKey(user, key)
+func (s *Sessions) Delete(id sessionID) {
 	s.mu.Lock()
 	delete(s.m, id)
 	s.deleted[id] = true

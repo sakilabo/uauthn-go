@@ -18,7 +18,10 @@ func isWindowsService() bool {
 	return err == nil && ok
 }
 
-type service struct{ log *eventlog.Log }
+type service struct {
+	log     *eventlog.Log
+	dataDir string
+}
 
 func (s *service) logf(format string, args ...any) {
 	if s.log != nil {
@@ -27,8 +30,12 @@ func (s *service) logf(format string, args ...any) {
 }
 
 func runService() error {
+	dir, _, err := parseDataDir(os.Args[1:])
+	if err != nil {
+		return err
+	}
 	el, _ := eventlog.Open(serviceName)
-	s := &service{log: el}
+	s := &service{log: el, dataDir: dir}
 	if el != nil {
 		defer el.Close()
 	}
@@ -40,7 +47,7 @@ func (s *service) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errc := make(chan error, 1)
-	go func() { errc <- listen(ctx, "", s.logf) }()
+	go func() { errc <- listen(ctx, "", s.dataDir, s.logf) }()
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for {
 		select {
@@ -66,7 +73,7 @@ func (s *service) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 	}
 }
 
-func installService() error {
+func installService(dataDir string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -80,11 +87,15 @@ func installService() error {
 		s.Close()
 		return fmt.Errorf("service %s already exists", serviceName)
 	}
+	var args []string
+	if dataDir != "" {
+		args = []string{"--data_dir", dataDir}
+	}
 	s, err := m.CreateService(serviceName, exe, mgr.Config{
 		DisplayName: "uauthn",
 		Description: "Passkey and password authentication for reverse proxies",
 		StartType:   mgr.StartAutomatic,
-	})
+	}, args...)
 	if err != nil {
 		return err
 	}

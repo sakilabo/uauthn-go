@@ -33,33 +33,35 @@ const (
 const DefaultTitle = "Sign in"
 
 type Config struct {
-	Dir           string
-	PasswdFile    string
-	IndexFile     string
-	Bind          string
-	Port          int
-	Prefix        string
-	Domain        string
-	ExpiredSec    int
-	Session       string
-	FlushSec      int
-	Log           string
-	LogMaxSize    int64
-	PasskeyPrompt string
-	Title         string
+	Dir            string
+	PasswdFile     string
+	IndexFile      string
+	Bind           string
+	Port           int
+	Prefix         string
+	Domain         string
+	ExpiredSec     int
+	Session        string
+	FlushSec       int
+	LogFile        string
+	LogMaxSize     int64
+	LogGenerations int
+	PasskeyPrompt  string
+	Title          string
 }
 
 func DefaultConfig() Config {
 	return Config{
-		Bind:          "0.0.0.0",
-		Port:          10997,
-		Prefix:        "/uauthn",
-		ExpiredSec:    86400,
-		Session:       SessionFileMode,
-		FlushSec:      5,
-		LogMaxSize:    1 << 20,
-		PasskeyPrompt: PromptAlways,
-		Title:         DefaultTitle,
+		Bind:           "0.0.0.0",
+		Port:           10997,
+		Prefix:         "/uauthn",
+		ExpiredSec:     3 * 24 * 60 * 60,
+		Session:        SessionFileMode,
+		FlushSec:       5,
+		LogMaxSize:     1 << 20,
+		LogGenerations: 3,
+		PasskeyPrompt:  PromptAlways,
+		Title:          DefaultTitle,
 	}
 }
 
@@ -116,10 +118,12 @@ func (c *Config) set(key, val string) error {
 		c.Session = val
 	case "flush_sec":
 		c.FlushSec, err = strconv.Atoi(val)
-	case "log":
-		c.Log = val
+	case "log_file":
+		c.LogFile = val
 	case "log_max_size":
 		c.LogMaxSize, err = strconv.ParseInt(val, 10, 64)
+	case "log_generations":
+		c.LogGenerations, err = strconv.Atoi(val)
 	case "passkey_prompt":
 		c.PasskeyPrompt = val
 	case "title":
@@ -161,6 +165,9 @@ func (c *Config) Validate() error {
 	}
 	if c.LogMaxSize < 0 {
 		return fmt.Errorf("log_max_size: must not be negative")
+	}
+	if c.LogGenerations < 0 {
+		return fmt.Errorf("log_generations: must not be negative")
 	}
 	return nil
 }

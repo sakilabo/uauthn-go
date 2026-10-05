@@ -10,7 +10,9 @@ import (
 	"golang.org/x/term"
 )
 
-const AddUsage = "add [--password PASSWORD] [--reset] USERNAME"
+const AddUsage = "[--password PASSWORD] [--reset] USERNAME"
+
+const IndexUsage = "[--output FILE]"
 
 type AddOptions struct {
 	User     string
@@ -91,6 +93,32 @@ func RunAdd(o AddOptions, passwd Backend, out io.Writer) error {
 		fmt.Fprintf(out, "updated the password of %s in %s\n", o.User, passwd)
 	}
 	return nil
+}
+
+func RunIndex(args []string, out io.Writer) error {
+	var path string
+	for i := 0; i < len(args); i++ {
+		name, val, hasVal := strings.Cut(args[i], "=")
+		if name != "--output" && name != "-output" {
+			return fmt.Errorf("unexpected argument %q", args[i])
+		}
+		if !hasVal {
+			if i+1 >= len(args) {
+				return fmt.Errorf("%s needs a value", name)
+			}
+			i++
+			val = args[i]
+		}
+		if val == "" {
+			return fmt.Errorf("%s must not be empty", name)
+		}
+		path = val
+	}
+	if path == "" {
+		_, err := out.Write(defaultIndex)
+		return err
+	}
+	return os.WriteFile(path, defaultIndex, 0o644)
 }
 
 func readNewPassword(out io.Writer) (string, error) {
