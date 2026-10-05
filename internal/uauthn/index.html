@@ -50,7 +50,7 @@ const $ = (id) => document.getElementById(id);
 const enc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const dec = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 const rdParam = new URLSearchParams(location.search).get('rd');
-const rd = rdParam && rdParam.startsWith('/') && !rdParam.startsWith('//') && !rdParam.startsWith('/\\') ? rdParam : '';
+const rd = rdParam && rdParam.startsWith('/') && !rdParam.startsWith('//') && !rdParam.startsWith('/\\') && !/[\x00-\x1f\x7f]/.test(rdParam) ? rdParam : '';
 let state = null;
 let pending = null;
 

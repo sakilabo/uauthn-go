@@ -371,8 +371,10 @@ func (s *Server) serveLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusFound)
 }
 
+// Browsers drop tabs and newlines from a URL, so "/\t/host" would become "//host".
 func isLocalPath(p string) bool {
-	return strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.HasPrefix(p, "/\\")
+	return strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.HasPrefix(p, "/\\") &&
+		!strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f })
 }
 
 func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, value string, age time.Duration) {
